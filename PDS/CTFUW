@@ -1,0 +1,937 @@
+         TITLE 'CTFUW   -- PROGRAMME DESCRIPTION'                       3.1  001
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  002
+*                                                                     * 3.1  003
+*        C T F U W                                                    * 3.1  004
+*                                                                     * 3.1  005
+* CLASS: BATCH PROGRAM / UTILITY                                      * 3.1  006
+*                                                                     * 3.1  007
+*        "COMPARE TWO FILES UNDER WINDOW" (CTFUW)                     * 3.1  007
+*                                                                     * 3.1  007
+* FUNCTION/OPERATION:                                                 * 3.1  008
+*        CTFUW   WILL READ THE WHOLE FILES INTO CORE (RESP. THOSE     * 3.1  009
+*        PARTS OF ALL RECORDS WHICH ARE TO BE COMPARED). THE USER MAY * 3.1  010
+*        SPECIFY A WINDOW WITH PARM='XX,YY' WHERE XX AND YY ARE TWO-  * 3.1  011
+*        BYTE INTEGERS INDICATING START COLUMN AND LENGTH. IF THEY    * 3.1  012
+*        ARE OMITTED, 01,80 IS ASSUMED. ONLY THE WINDOW PART OF EACH  * 3.1  013
+*        RECORD IS KEPT IN CORE. FOR EACH FILE THERE IS A BUFFER FOR  * 3.1  014
+*        A MAXIMUM NUMBER OF RECORDS DEPENDENT ON THE PARTITION SIZE. * 3.1  015
+*        PROBABLY SOME GENTLE USER OF THIS PROGRAM WHICH HAS BEEN     * 3.1  016
+*        WRITTEN QUICK AND DIRTY (ESPECIALLY DIRTY) EXTENDS THE       * 3.1  017
+*        FACILITIES BY THE FOLLOWING: IF A BUFFER IS EXHAUSTED AND    * 3.1  018
+*        THERE IS SOME SPACE IN FRONT OF IT AS SOME RECORDS HAVE BEEN * 3.1  019
+*        COMPARED SUCCESSFULLY THE CONTENTS OF THE BUFFER IS SHIFTED  * 3.1  020
+*        AND SOME MORE RECORDS ARE READ IN. TO AVOID INEFFIENCY, A    * 3.1  021
+*        MINIMUM AMOUNT OF SPACE TO BE FREE IN THE FRONT OF THE       * 3.1  022
+*        BUFFER SHOULD BE SPECIFIED.                                  * 3.1  023
+*                                                                     * 3.1  024
+*        THE SEARCH IS EXECUTED AS FOLLOWS:                           * 3.1  025
+*       (1)    THE WINDOWS OF RECORD F1 OF FILE1 AND OF RECORD F2 OF  * 4.0--001
+*              FILE2 ARE COMPARED. IF EQUAL: BOTH ARE PRINTED,        * 4.0--002
+*              F1 := F1+1; F2 := F2+1; REPEAT (1).                    * 4.0--003
+*              ON EOF PRINT REST OF OTHER FILE AS MISSING AND STOP.   * 4.0--004
+*       (2)    F1P := F1; F2P := F2;                                  * 4.0--005
+*       (3)    F1P := F1P+1; COMPARE RECORD F1P OF FILE1 WITH RECORDS * 4.0--006
+*              F2 TO F2P OF FILE2. ON EQUAL: F2P -> MATCHING RECORD;  * 4.0--007
+*              GO TO (5). ON EOF IN FILE1 THIS STEP IS SKIPPED        * 4.0--008
+*       (4)    F2P := F2P+1; COMPARE RECORD F2P OF FILE2 WITH RECORDS * 4.0--009
+*              F1 TO F1P OF FILE1. ON EQUAL: F1P -> MATCHING RECORD;  * 4.0--010
+*              GO TO (5). ON EOF IN FILE2 THIS STEP IS SKIPPED        * 4.0--011
+*       (6)    PRINT RECORDS F1 TO F1P OF FILE1 AS MISSING IN FILE2;  * 4.0--012
+*              PRINT RECORDS F2 TO F2P OF FILE2 AS MISSING IN FILE1;  * 4.0--013
+*              GO TO (1)                                              * 4.0--014
+*                                                                     * 3.1  039
+* ENTRY POINTS:                                                       * 3.1  040
+*        CTFUW                                                        * 3.1  041
+*                                                                     * 3.1  042
+* INPUT:                                                              * 3.1  043
+*                                                                     * 3.1  044
+*  R1  HAS TO POINT TO A STANDARD OS PARM-INFO WITH FOLLOWING CONTENTS* 3.2--001
+*      START,LENGTH,       START AND LENGTH OF FIRST WINDOW           * 3.2--002
+*      S2,L2,S3,L3,S4,L4       .... SECOND, THIRD AND FOURTH WINDOW   * 3.2--003
+*      HOOK=2/N            NUMBER OF EQUAL RECORDS WHICH DEFINE A HOOK* 3.2--004
+*      CONTEXT=0/N         NUMBER OF RECORDS PRINTED AROUND NON-EQUAL * 3.2--005
+*                          RECORDS (ZERO MEANS ALL)                   * 3.2--006
+*      COMPRESS=N/NO/Y/YES BLANKS WILL BE COMPRESSED AFTER WINDOWING  * 3.2--007
+*      FORMAT=STD/FULL     STD: WINDOWS WILL BE PRINTED IN TWO COLUMNS* 3.2--008
+*                               UP TO 68 CHARACTERS                   * 3.2--009
+*                          FULL: THE WHOLE WINDOWS (UP TO 128 CHARAC- * 3.2--010
+*                                TERS WILL BE PRINTED                 * 3.2--011
+*      W=O/L  ONLY BS2000: OUTPUT TO SYSOUT (O) OR SYSLST (L)         * 3.2--012
+*                                                                     * 3.2--013
+*      IN BS2000 THE FIRST RECORD READ FROM SYSDTA MUST CONTAIN THE   * 3.2--014
+*      PARM-INFO                                                      * 3.2--015
+*                                                                     * 3.2--016
+* OUTPUT:                                                             * 3.1  053
+*        WINDOW OF RECORD OF FILE1    X    WINDOW OF RECORD OF FILE2  * 3.1  054
+*         WITH X =    ==    |   ¬=   |    <-    |   -> .  WITH THE    * 3.2--017
+*        MEANING EQUAL, NOT EQUAL, MISSING IN FILE1, MISSING IN FILE2 * 3.1  056
+*                                                                     * 3.1  057
+* DD-STATEMENTS:                                                      * 3.1  058
+*        SYSPRINT                                                     * 3.1  059
+*        FILE1                                                        * 3.1  060
+*        FILE2                                                        * 3.1  061
+*                                                                     * 3.1  063
+* EXTERNAL ROUTINES:  BTXCSCAN  TO SCAN PARMINFO                      * 4.0--015
+*                                                                     * 3.1  065
+* TABLES/WORK AREAS:                                                  * 3.1  066
+*                                                                     * 3.1  067
+* ATTRIBUTES: NONRENT                                                 * 3.1  068
+*                                                                     * 3.1  069
+* RESTRICTIONS: LENGTH(WINDOW) > 60 --> THE FIRST 60 BYTES ARE PRINTED* 3.1  070
+*                                                                     * 3.1  071
+* AUTHORIZATION REQUIRED: NONE                                        * 3.1  072
+*                                                                     * 3.1  073
+* RELATED PGMS: IEBCOMPR                                              * 3.1  074
+*                                                                     * 3.1  075
+* STORAGE:                                                            * 3.1  076
+*        PROGRAM:   < 4K BYTES                                        * 4.0--016
+*        DYNAMIC:   WHOLE PARTITION (-4K) AS FILE BUFFER              * 3.1  078
+*        BUFFER :                                                     * 3.1  079
+*                                                                     * 3.1  080
+* LOAD MODULE CREATION:                                               * 3.1  081
+*      SOURCE LANGUAGE     ASSEMBLER H                                * 3.1  082
+*      COMPILE LIBRARIES   BITS.MACLIB,SYS1.MACLIB                    * 3.1  083
+*      COMPILE PARAMETERS  -                                          * 3.1  084
+*      LINK-EDIT LIBRARIES  BITS.LINKLIB                              * 3.1  085
+*      LINK-EDIT PARAMETERS -                      NOT: RENT,OL       * 3.1  086
+*      LINK-EDIT INPUT      -                                         * 3.1  087
+*                                                                     * 3.1  088
+* CHANGE LEVEL:           2.0               20DEC73  / 19AUG74        * 3.1  089
+*                         2.1 GETMAIN VC    18MAY76            ICKING * 3.1  090
+*                         3.0               22SEP76 PAHL              * 3.1  091
+*        MAJOR REWRITE AND FUNCTIONAL EXTENSION.  MULTI-FIELD SELECT  * 3.1  092
+*        AND DIVERSE OPTIONS ADDED; ENHANCED SEARCH ALGORITHM FOR NEXT* 3.1  093
+*        MATCHING RECORDS ETC...                                      * 3.1  094
+*        SIEMENS BS2000 CODE ADDED: PROGRAM CAN NOW BE GENERATED FOR  * 3.1  095
+*        EITHER IBM/OS OR SIEMENS BS2000.                             * 3.1  096
+*                         3.1               31JAN79 PAHL              * 3.1  097
+*        ERROR CORRECTIONS. W=OUT/LST PARAM (EFFECTIVELY IN BS2000 ONLY 3.1  098
+*                         3.2               10JUN80 ICKING            * 3.2--018
+*        V- AND U-RECORDS FOR IBM-VERSION                             * 3.2--019
+*                         4.0               10JUN80 ICKING            * 4.0--017
+*        SEARCH ALGORITHM RE-STRUCTURED TO CORRECT THE EOF-HANDLING.  * 4.0--018
+*                                                                     * 3.1  099
+* NOTES:                                                              * 3.1  100
+*        THIS PROGRAMME HAS BEEN WRITTEN (RATHER) QUICK AND           * 3.1  101
+*        D I R T Y.                                                   * 3.1  102
+*        REALIZE THAT IN MOST CASES THERE IS MORE THAN ONE WAY TO     * 3.1  103
+*        MATCH TWO DIFFERING FILES. IF THE PROGRAMME FITS TWO RECORDS * 3.1  104
+*        THAT ARE EQUAL BUT SHOULD NOT BE ASSUMED TO BE EQUAL, MARK   * 3.1  105
+*        ONE OF THEM BY A CHARACTER NOT OCCURING IN THE FILE. SO OTHER* 3.1  106
+*        COMPARISONS ARE MADE BY THE PROGRAM.                         * 3.1  107
+*        A T T E N T I O N.                                           * 3.1  108
+*        THIS SOURCE FILE IS USED FOR THE CREATION OF PROGRAMMES FOR  * 3.1  109
+*        THE FOLLOWING LIBRARIES. CHECK COMPATIBILITY OF CHANGES IN   * 3.1  110
+*        CASE OF UPDATING AND NOTIFY CHANGES IN THE OTHER SOURCE      * 3.1  111
+*        LIBRARIES.                                                   * 3.1  112
+*                                                                     * 3.1  113
+* RELATED LIBRARY :                 CORRESPONDEND SOURCE LIBRARY :    * 3.1  114
+*        BITS.LINKLIB                    BITS.SOURCE.LINKLIB          * 3.1  115
+*                                                                     * 3.1  116
+*                                                                     * 3.1  117
+*                                                                     * 3.1  118
+* AUTHOR: M.ECKARDT; T.PAHL (3.0); W.ICKING (4.0)                     * 3.1  119
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  120
+         TITLE 'CTFUW    - MACROS'                                      3.1  121
+         MACRO                                                          3.1  122
+&LABEL   ADVNC &PTR,&EOF=,&CONT=                                        3.1  123
+.*  ADVANCE FILE POINTER                                                3.1  124
+&LABEL   ALR   &PTR,RLEN                                                3.1  125
+         AIF   ('&EOF&CONT' EQ '').MEND                                 3.1  126
+         CKEOF &PTR,EOF=&EOF,CONT=&CONT                                 3.1  127
+.MEND    MEND                                                           3.1  128
+         SPACE 2                                                        3.1  129
+         MACRO                                                          3.1  130
+&LABEL   CKEOF &PTR,&EOF=,&CONT=                                        3.1  131
+.*  CHECK FILE POINTER FOR EOF REACHED                                  3.1  132
+         LCLC  &F                                                       3.1  133
+&F       SETC  '&PTR'(2,1)             1/2                              3.1  134
+&LABEL   CL    &PTR,TAB&F.END          CHECK FOR END                    3.1  135
+         AIF   ('&EOF' EQ '').CONT                                      3.1  136
+         BNL   &EOF                                                     3.1  137
+.CONT    AIF   ('&CONT' EQ '').MEND                                     3.1  138
+         BL    &CONT                                                    3.1  139
+.MEND    MEND                                                           3.1  140
+         SPACE 2                                                        3.1  141
+         MACRO                                                          3.1  142
+&LABEL   LIMIT &REG,&VALUE                                              3.1  143
+.*  LIMIT TO ALLOWED MAX VALUE: &REG=MIN(&REG,&VALUE)                   3.1  144
+&LABEL   CH    &REG,*+10                                                3.1  145
+         BNH   *+8                                                      3.1  146
+         LA    &REG,&VALUE                                              3.1  147
+         MEND                                                           3.1  148
+         SPACE 2                                                        4.0--019
+         MACRO                                                          4.0--020
+&L       PUTEQ ,                       PUT EQ-REOCRDS                   4.0--021
+&L       OI    PUTFLAG,PUT#EQ                                           4.0--022
+         BAL   14,PUT1                                                  4.0--023
+         BAL   14,PUT2                                                  4.0--024
+         BAL   14,PUTOUT                                                4.0--025
+         MEND                                                           4.0--026
+         SPACE 2                                                        4.0--027
+         MACRO                                                          4.0--028
+&L       PUTQEQ ,                      PUT QUITE-EQUAL RECORDS          4.0--029
+&L       OI    PUTFLAG,PUT#QUEQ                                         4.0--030
+         BAL   14,PUT1                                                  4.0--031
+         BAL   14,PUT2                                                  4.0--032
+         BAL   14,PUTOUT                                                4.0--033
+         MEND                                                           4.0--034
+         SPACE 2                                                        4.0--035
+         MACRO                                                          4.0--036
+&L       PUTINS1 ,                     PUT INSERTED RECORD FROM FILE 1  4.0--037
+&L       OI    PUTFLAG,PUT#INS1                                         4.0--038
+         BAL   14,PUT1                                                  4.0--039
+         BAL   14,PUTOUT                                                4.0--040
+         MEND                                                           4.0--041
+         SPACE 2                                                        4.0--042
+         MACRO                                                          4.0--043
+&L       PUTINS2 ,                     PUT INSERTED RECORD FROM FILE 2  4.0--044
+&L       OI    PUTFLAG,PUT#INS2                                         4.0--045
+         BAL   14,PUT2                                                  4.0--046
+         BAL   14,PUTOUT                                                4.0--047
+         MEND                                                           4.0--048
+         SPACE 2                                                        4.0--049
+         MACRO                                                          4.0--050
+&L       PUTMSG ,                      PUT MESSAGE                      4.0--051
+&L       OI    PUTFLAG,PUT#MSG                                          4.0--052
+         BAL   14,PUTOUT                                                4.0--053
+         MEND                                                           4.0--054
+         TITLE 'CTFUW   - EQUATES'                                      3.1  149
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  150
+*   FOLLOWING SETB CONTROLS CODE GENERATION FOR SIEMENS/IBM SYSTEM    * 3.1  151
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  152
+         GBLB  &IBM                                                     3.1  153
+&IBM     SETB  1                       0=SIEMENS, 1=IBM                 3.1  154
+         SPACE 4                                                        3.1  155
+         PRINT NOGEN                                                    3.1  156
+CTFUW    CSECT                                                          3.1  157
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  158
+*   REGISTER DECLARATIONS                                             * 3.1  159
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  160
+R13      EQU   13                      WORK REGISTER                    3.1  163
+R14      EQU   14                      |                                3.1  164
+R15      EQU   15                      |                                3.1  165
+R0       EQU   0                       |                                3.1  166
+R1       EQU   1                       |                                3.1  167
+R2       EQU   2                                                        4.0--055
+F1       EQU   3                       STM/BXLE OVER FILE 1             4.0--056
+LEN1     EQU   F1+1 4   (EVEN)         |                                4.0--057
+F1P      EQU   F1+2 5                  |                                4.0--058
+RINCR    EQU   6        (EVEN)         BXLE                             4.0--059
+RCOMP    EQU   RINCR+1 7                                                4.0--060
+RBASE    EQU   8                       CODE BASE                        4.0--061
+F2       EQU   9                       STM/BXLE OVER FILE 2             4.0--062
+LEN2     EQU   F2+1 10  (EVEN)         |                                4.0--063
+F2P      EQU   F2+2 11                 |                                4.0--064
+RLEN     EQU   LEN1                                                     4.0--065
+         TITLE 'CTFUW   -   COMPARE TWO FILES UNDER WINDOW'             3.1  175
+         AIF   (&IBM).I2                                                3.1  176
+         BALR  RBASE,0                                              SIE 3.1  177
+         USING *,RBASE                                              SIE 3.1  178
+         B     GOGOGO                                               SIE 3.1  179
+         DC    C'                                              '        4.0--066
+GOGOGO   LA    R13,SAVEAREA            -> A SAVE AREA FOR CALLEES   SIE 3.1  181
+         SETBF 256,N                                                SIE 3.1  182
+*** REQUEST WINDOW PARAMETERS FROM USER                             SIE 3.1  183
+         WROUT MSGOPT1,ERRWROUT        'SPEFICY OPTIONS'            SIE 3.1  184
+         WROUT MSGOPT2,ERRWROUT                                     SIE 3.1  185
+         RDATA MSGIN,1,4+MSGIN#,KEYOUT=Y                            SIE 3.1  186
+         LA    R1,MSGIN+4              -> INPUT STRING.             SIE 3.1  187
+         LA    R0,X'FF'                PSEUDO INPUT LENGTH          SIE 3.1  188
+         AGO   .C2                                                  SIE 3.1  189
+.I2      ANOP                                                       IBM 3.1  190
+         PROLOG ID='CTFUW-4.0-800610-ICKING',SSA=SAVEAREA,BASE=RBASE BM 4.0--067
+         L     R2,0(,R1)               -> EXEC PARM STRING          IBM 3.1  192
+         OPEN  (SYSPRINT,OUTPUT)                                    IBM 3.1  193
+         LH    R0,0(,R2)               LENGTH OF PARM STRING        IBM 3.1  194
+         LA    R1,2(,R2)               -> PARM TEXT                 IBM 3.1  195
+         LTR   R0,R0                   PARM OMITTED?                IBM 3.1  196
+         BP    *+12                    SKIP IF SPECIFIED            IBM 3.1  197
+         LA    R1,=C'1,80'             ELSE GET DEFAULT             IBM 3.1  198
+         LA    R0,4                                                 IBM 3.1  199
+.C2      ANOP                                                           3.1  200
+         ST    R1,TEMP4                SET INPUT PTR                    3.1  201
+         STC   R0,TEMP4                INPUT LENGTH.                    3.1  202
+         AIF   (&IBM).I25                                               3.1  203
+         ECALL BTXCSCAN,SCANPARM       SCAN INPUT                   SIE 3.1  204
+         AGO   .C25                                                 SIE 3.1  205
+.I25     ANOP                                                       IBM 3.1  206
+         ECALL BTXCSCAN,SCANPARM       SCAN INPUT                   IBM 3.1  207
+.C25     ANOP                                                           3.1  208
+         LTR   R15,R15                                                  3.1  209
+         BNZ   ERRPARM                                                  3.1  210
+*** ANALYSE KEYWORD PARAMETERS                                          3.1  211
+*   FORMAT=STD/FULL                                                     3.1  212
+         BTXCODE KFORMAT,FAIL=ERRPARM,MF=(E,CFORMAT)                    3.1  213
+         CH    R2,=H'2'                FORMAT=FULL ?                    3.1  214
+         BNE   *+8                     SKIP IF STD.                     3.1  215
+         OI    PUTFLAG,PUT#FULL        SET FORMAT=FULL                  3.1  216
+*   HOOK=NNN (REQUIRED HOOK SIZE: 1-32, DEFAULT 2)                      3.1  217
+         BTXCVB KHOOK,FAIL=ERRPARM                                      3.1  218
+         LTR   R0,R0                                                    3.1  219
+         BNZ   *+8                     SKIP IF SPECIFIED                3.1  220
+         LA    R0,2                    ELSE ASSUME DEFAULT              3.1  221
+         LIMIT R0,32                   LIMIT TO MAX VALUE               3.1  222
+         ST    R0,KHOOK                                                 3.1  223
+*   CONTEXT=NNN (OF EQ LINES, PRINT ONLY CONTEXT FOR OTHERS)            3.1  224
+         BTXCVB KCONTEXT,FAIL=ERRPARM                                   3.1  225
+         LIMIT R0,32                   LIMIT TO MAX VALUE               3.1  226
+         ST    R0,KCONTEXT             0 MEANS PRINT ALL EQ LINES.      3.1  227
+*   COMPRESS=NO/YES (BLANK COMPRESSION AFTER SELECTION OF FIELDS)       3.1  228
+         BTXCODE KCOMPR,FAIL=ERRPARM,MF=(E,CCOMPR)                      3.1  229
+         CH    R2,=H'2'                                                 3.1  230
+         BNE   *+8                     SKIP UNLESS COMPRESS=YES         3.1  231
+         OI    OPTFLAG,OPT#COMP                                         3.1  232
+         CH    R2,=H'4'                                                 3.1  233
+         BNE   *+8                     SKIP UNLESS COMPRESS=Y           3.1  234
+         OI    OPTFLAG,OPT#COMP                                         3.1  235
+*   W=OUT/LST (ROUTE OUTPUT TO SYSOUT OR SYSLST - SIEMENS)              3.1  236
+         BTXCODE KW,FAIL=ERRPARM,MF=(E,CW)                              3.1  237
+         CH    R2,=H'2'                                                 3.1  238
+         BNE   *+8                     SKIP UNLESS W=LST                3.1  239
+         OI    OPTFLAG,OPT#WLST                                         3.1  240
+*** CONVERT INPUT OFFSET1,LENGTH1<,OFFSET2,LENGTH2> TO BINARY           3.1  241
+         SR    RINCR,RINCR                                              3.1  242
+         IC    RINCR,POSLIST           NUMBER OF OPERANDS               3.1  243
+         LA    RCOMP,POSLIST+4                                          3.1  244
+         LTR   RINCR,RINCR             ANY SPECIFIED                    3.2--020
+         BNZ   INPOS4                  YES, SKIP                        3.2--021
+         LM    R0,R1,=A(1,80)          DEFAULT 1,80                     3.2--022
+         STM   R0,R1,0(RCOMP)                                           3.2--023
+         MVI   POSLIST,2               TWO OPERANDS                     3.2--024
+         B     INPOS4A                                                  3.2--025
+INPOS4   BTXCVB 0(RCOMP),FAIL=ERRPARM                                   3.1  245
+         ST    R0,0(,RCOMP)            REPLACE STRING PTR BY VALUE      3.1  246
+         LA    RCOMP,4(,RCOMP)                                          3.1  247
+         BCT   RINCR,INPOS4            LOOP OVER OPERANDS               3.1  248
+*   CONSTRUCT FIELDS SELECTOR ACCORDING TO PARAMETERS                   3.1  249
+INPOS4A  SR    RLEN,RLEN               ACCUMULATE RESULT LENGTH         3.2--026
+         SR    RINCR,RINCR                                              3.1  251
+         IC    RINCR,POSLIST                                            3.1  252
+         SRL   RINCR,1                 NUMBER OF OPERAND PAIRS          3.1  253
+         LA    RCOMP,POSLIST+4                                          3.1  254
+INPOS5   LM    R1,R2,0(RCOMP)          AN OFFSET,LENGTH PAIR            3.1  255
+         LTR   R1,R1                                                    3.1  256
+         BNP   INPOS7                  SKIP IF NO OFFSET                3.1  257
+         LTR   R2,R2                                                    3.1  258
+         BNP   INPOS7                  OR NO LENGTH.                    3.1  259
+         BCTR  R1,0                    COLUMN 1 IS +0                   3.1  260
+INPOS6   CH    RLEN,=H'256'            CHECK FOR SELECTOR OVERFLOW      3.1  261
+         BNL   ERRPARM                 JAM IT IF.                       3.1  262
+         STC   R1,SELECTOR(RLEN)       SELECT BYTE                      3.1  263
+         LA    RLEN,1(,RLEN)           NEXT OUTPUT BYTE.                3.1  264
+         LA    R1,1(,R1)               NEXT INPUT BYTE                  3.1  265
+         BCT   R2,INPOS6               LOOP OVER FIELD                  3.1  266
+INPOS7   LA    RCOMP,8(,RCOMP)         BUMP TO NEXT FIELD PAIR          3.1  267
+         BCT   RINCR,INPOS5            REPEAT FOR NEXT FIELD            3.1  268
+*   (RLEN) NOW CONTAINS RESULTING OUTPUT LENGTH; 'SELECTOR' IDENTI-     3.1  269
+*   FIES THE INPUT BYTES IN SEQUENCE OF SELECTION.                      3.1  270
+         BCTR  RLEN,0                                                   3.1  271
+         STC   RLEN,GETMVC+1           MODIFY THE INPUT                 3.1  272
+         STC   RLEN,GETTR+1             SELECTOR INSTRUCTIONS.          3.1  273
+         STC   RLEN,CLCEQ+1                                             4.0--068
+         STC   RLEN,CLC12+1                                             4.0--069
+         STC   RLEN,CLC21+1                                             4.0--070
+         LA    RLEN,1(,RLEN)           TRUE LENGTH AGAIN                3.1  279
+         LR    LEN2,RLEN                                                4.0--071
+         LR    RINCR,RLEN                                               3.1  280
+         TITLE 'CTFUW -- READ IN BOTH FILES'                            4.0--072
+*** INITIALISE FILE STORAGE                                             3.1  281
+         AIF   (&IBM).C3                                                3.2--027
+         REQM  1                                                    SIE 3.1  283
+         ST    R1,TAB1A                START OF FILE STORAGE        SIE 3.1  284
+         LR    F1,R1                                                SIE 3.1  285
+         LA    RCOMP,4095(,R1)         LAST BYTE ALLOCATED.         SIE 3.1  286
+.C3      ANOP                                                           3.1  306
+*********************************************************************** 3.1  307
+*   LOAD A FILE INTO FILE STORAGE BUFFER                              * 3.1  308
+*********************************************************************** 3.1  309
+         NI    EOFNOPB+1,X'0F'         SET TO NOP.                      3.1  310
+         AIF   (&IBM).I41                                               3.1  311
+OPEN     WROUT MSGFILE,ERRWROUT                                     SIE 3.1  312
+         BKPT                                                       SIE 3.1  313
+READ1    BLANK BUFFER,BUFFER#                                       SIE 3.1  314
+         RDATA BUFFER,EOFFILE,BUFFER#,KEYOUT=Y                      SIE 3.1  315
+         LR    R0,F1                                                SIE 3.1  316
+         BXLE  R0,RINCR,READ4          B.IF IF STILL ROOM           SIE 3.1  317
+         REQM  1                       ELSE GET ANOTHER PAGE        SIE 3.1  318
+         AL    RCOMP,=F'4096'                                       SIE 3.1  319
+READ4    LA    R1,BUFFER+4                                          SIE 3.1  320
+         AGO   .C41                                                 SIE 3.1  321
+.I41     ANOP                                                       IBM 3.1  322
+OPEN     OPEN  (FILE,INPUT)                                         IBM 3.1  323
+*                                                                   IBM 3.1  324
+*  INITIALISE FILE STORE                                                3.2--028
+*   GETMAIN WHOLE PARTITION                                         IBM 3.1  289
+         NOP   GOTTEN                  SKIP OVER INIT                   3.2--029
+         OI    *-3,X'F0'                                                3.2--030
+         GETMAIN VU,LA=TAB2A,A=TAB1A                                IBM 3.1  290
+         L     R1,TAB1A                FREE 4K FOR SYSTEM USE       IBM 3.1  291
+         L     R0,=A(4*1024)           |                            IBM 3.1  292
+         FREEMAIN R,LV=(0),A=(1)       |                            IBM 3.1  293
+         LM    14,15,TAB1A             GET ADDRESS AND LENGTH OF AREIBM 3.1  294
+         A     14,=A(4*1024)           SKIP FREE'D                  IBM 3.1  295
+         S     15,=A(4*1024)           REDUCE LENGTH                IBM 3.1  296
+         LA    1,0(15,14)              END OF AREA 2                IBM 3.1  297
+         SRL   15,1                    HALF LENGTH                  IBM 3.1  298
+         LA    0,0(15,14)              START OF AREA 2              IBM 3.1  299
+         LR    15,0                    END OF AREA 1                IBM 3.1  300
+         SR    15,RINCR                -LENGTH FOR BXLE             IBM 3.1  301
+         SR    1,RINCR                 -LENGTH FOR BXLE             IBM 3.1  302
+         STM   14,1,TAB1A                                           IBM 3.1  303
+         L     RCOMP,TAB1END           -> END OF FILE1 BUFFER       IBM 3.1  304
+         L     F1,TAB1A                -> FIRST RECORD BUFFER       IBM 3.1  305
+GOTTEN   EQU   *                                                        3.2--031
+         SPACE 1                                                        3.2--032
+READ1    GET   FILE                                                 IBM 3.1  325
+         LR    R0,F1                                                IBM 3.1  326
+         BXLE  R0,RINCR,READ4                                       IBM 3.1  327
+         BLANK LINE+1,132                                           IBM 3.1  328
+         MVC   LINE+1(MSGLONG#),MSGLONG                             IBM 3.1  329
+         PUTMSG ,                                                       4.0--073
+         B     EOFFILE                                              IBM 3.1  332
+READUMVC MVC   BUFFER(*-*),0(R1)       RECORD INTO BUFFER               3.2--033
+READ4    EQU   *                                                        3.2--034
+         TM    DCBRECFM-IHADCB+FILE,DCBRECU RECFM= ?                    3.2--035
+         BZ    ERRPARM                 ... NOT DEFINED                  3.2--036
+         BO    READU                   ... U                            3.2--037
+         TM    DCBRECFM-IHADCB+FILE,DCBRECF                             3.2--038
+         BO    READF                   ... F                            3.2--039
+*                                      ... V (ELSE)                     3.2--040
+READV    MVC   TEMP4,0(R1)             GET LENGTH OF RECORD             3.2--041
+         LH    R15,TEMP4                                                3.2--042
+         LA    R1,4(,R1)               START OF DATA                    3.2--043
+         SH    R15,=H'4'                                                3.2--044
+         B     READUV                  SKIP                             3.2--045
+READU    LH    R15,DCBLRECL-IHADCB+FILE LENGTH OF RECORD                3.2--046
+READUV   BLANK BUFFER,BUFFER#                                           3.2--047
+         LTR   R15,R15                 TEST LENGTH                      3.2--048
+         BNP   READUV9                 EMPTY RECORD                     3.2--049
+         CH    R15,*+10                MIN ((R15),256)                  3.2--050
+         BNH   *+8                                                      3.2--051
+         LA    R15,BUFFER#                                              3.2--052
+         BCTR  R15,0                                                    3.2--053
+         EX    R15,READUMVC            MVC BUFFER(*-*),0(R1)            3.2--054
+READUV9  LA    R1,BUFFER               PTR INPUT RECORD                 3.2--055
+READF    EQU   *                                                        3.2--056
+.C41     ANOP                                                           3.1  334
+GETMVC   MVC   0(*-*,F1),SELECTOR      FETCH SELECTOR                   3.1  335
+GETTR    TR    0(*-*,F1),0(R1)         SELECT INPUT BYTES ACCORDINGLY.  3.1  336
+*   BLANK COMPRESSION                                                   3.1  337
+         TM    OPTFLAG,OPT#COMP                                         3.1  338
+         BZ    READ7                   SKIP IF NOT TO BE DONE.          3.1  339
+         LR    F1P,F1                  INPUT POINTER                    3.1  340
+         LR    F2P,F1                  OUTPUT POINTER                   3.1  341
+         LR    R2,RLEN                 INPUT LENGTH                     3.1  342
+         SR    R15,R15                 CHAR VEHICLE                     3.1  343
+         LA    R14,C' '                A BLANK TO SAVE STORAGE ACCESS   3.1  344
+READ6A   IC    R15,0(F1P)                                               3.1  345
+         CLR   R15,R14                 BLANK DETECTED?                  3.1  346
+         BNE   READ6C                  NO, COPY IT                      3.1  347
+         CLI   1(F1P),C' '             ANOTHER BLANK FOLLOWS?           3.1  348
+         BE    READ6S                  YES, SKIP IT                     3.1  349
+READ6C   STC   R15,0(F2P)              OUTPUT THE CHAR                  3.1  350
+         LA    F2P,1(,F2P)                                              3.1  351
+READ6S   LA    F1P,1(,F1P)                                              3.1  352
+         BCT   R2,READ6A                                                3.1  353
+         LR    R2,F1P                                                   3.1  354
+         SR    R2,F2P                  NUMBER OF BLANKS DROPPED         3.1  355
+         BNP   READ7                   OVERWORKED: NONE AT ALL          3.1  356
+READ6X   MVI   0(F2P),C' '             CLEAR THE SHIFT TRACK            3.1  357
+         LA    F2P,1(,F2P)             BY APPENDING ENOUGH BLANKS       3.1  358
+         BCT   R2,READ6X               AT THE END.                      3.1  359
+*                                                                       3.1  360
+READ7    LR    F1,R0                   -> NEXT FREE PLACE               3.1  361
+         B     READ1                                                    3.1  362
+*** END OF FILE REACHED                                                 3.1  363
+         AIF   (&IBM).I48                                               3.1  364
+EOFFILE  CH    R15,=H'16'                                           SIE 3.1  365
+         BNE   ERRREAD                                              SIE 3.1  366
+         SYSFL 'SYSDTA=(SYSCMD)'       RESET SYSDTA SOURCE          SIE 3.1  367
+         AGO   .C48                                                 SIE 3.1  368
+.I48     ANOP                                                       IBM 3.1  369
+EOFFILE  CLOSE FILE                                                 IBM 3.1  370
+         FREEPOOL FILE                                              IBM 3.1  371
+         MVI   DCBDDNAM+4-IHADCB+FILE,C'2'                          IBM 3.1  372
+         MVI   MSGLONG+4,C'2'                                       IBM 3.1  373
+         L     RCOMP,TAB2END           -> END OF FILE2 BUFFER       IBM 3.1  374
+.C48     ANOP                                                           3.1  375
+EOFNOPB  NOP   LOADED                                                   3.1  376
+         ST    F1,TAB1END              END OF FILE1 BUFFER              3.1  377
+         ST    F1,TAB2A                START OF FILE2 BUFFER            3.1  378
+         OI    EOFNOPB+1,X'F0'                                          3.1  379
+         B     OPEN                    AND LOAD IT, TOO.                3.1  380
+*                                                                       3.1  381
+LOADED   ST    F1,TAB2END              END OF FILE2 BUFFER.             3.1  382
+         SPACE 4                                                        3.1  383
+*********************************************************************** 3.1  384
+* FILES NOW IN CORE                                                   * 3.1  385
+*********************************************************************** 3.1  386
+         LA    R0,60                   MAX. PRINT WIDTH IF TWO-COLUMN   3.1  387
+         TM    PUTFLAG,PUT#FULL                                         3.1  388
+         BNO   *+8                     SKIP UNLESS FULL FORMAT          3.1  389
+         LA    R0,128                  MAX. PRINT WIDTH IF FULL-FORMAT  3.1  390
+         CLR   R0,RLEN                                                  3.1  391
+         BNH   *+6                     SKIP IF TRUNC NECESSARY          3.1  392
+         LR    R0,RLEN                 ELSE USE ACTUAL (SHORTER) RECLEN 3.1  393
+         BCTR  R0,0                    -1 FOR 'EX'                      3.1  394
+         STC   R0,PUT1MVC1+1                                            3.1  395
+         STC   R0,PUT1MVC2+1                                            3.1  396
+         STC   R0,PUT2MVC1+1                                            3.1  397
+         STC   R0,PUT2MVC2+1                                            3.1  398
+         L     F1,TAB1A                                                 3.1  399
+         L     F2,TAB2A                                                 3.1  400
+         TITLE 'CTFUW -- DISPLAY MATCHING RECORDS'                      4.0--074
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  405
+*        HERE TO DISPLAY MATCHING RECORDS                             * 3.1  406
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  407
+TESTEQ   L     RINCR,KCONTEXT          0 OR NUMBER OF CONTEXT LINES     3.1  408
+CLCEQ    CLC   0(*-*,F1),0(F2)                                          3.1  409
+         BNE   NOTEQUAL                                                 3.1  410
+*   PRINT MATCHING RECORD(S) OF TRAILING CONTEXT                        3.1  411
+         PUTEQ ,                                                        4.0--075
+         ADVNC F1,EOF=EXHF1                                             4.0--076
+         ADVNC F2,EOF=EXHF2C                                            4.0--077
+         BCT   RINCR,CLCEQ                                              3.1  418
+*** TRAILING CONTEXT DONE.  NOW COUNT MATCHING RECORDS WITHOUT PRINT    3.1  419
+EQSKIP1  EX    0,CLCEQ                                                  3.1  420
+         BNE   EQSKIP3                 B.IF END OF MATCHING RECORDS.    3.1  421
+         LA    RINCR,1(,RINCR)         COUNT SKIPPED RECORDS            3.1  422
+         ADVNC F1,EOF=EQSKIP2                                           3.1  423
+         ADVNC F2,EOF=EQSKIP3                                           3.1  424
+         B     EQSKIP1                                                  3.1  425
+*                                                                       3.1  426
+EQSKIP2  ADVNC F2                      ASSURE SAME LEVEL IN BOTH FILES  3.1  427
+*** NON-MATCH REACHED.  DETERMINE LEADING CONTEXT, PRINT 'N RECORDS     3.1  428
+*** SKIPPED' AND LEADING CONTEXT RECORDS.                               3.1  429
+EQSKIP3  LR    R0,RINCR                                                 3.1  430
+         S     R0,KCONTEXT             (R0) = RECORDS NOT TO BE PRINTED 3.1  431
+         CH    R0,=H'2'                                                 3.1  432
+         BNH   EQLEAD                  B.IF NOT 2 AT LEAST: PRINT THEM  3.1  433
+         L     RINCR,KCONTEXT          LEADING CONTEXT TO PRINT         3.1  434
+*   PRINT NUMBER OF RECORDS NOT DISPLAYED (BETWEEN PREVIOUS TRAILING    3.1  435
+*   AND THIS LEADING CONTEXT).                                          3.1  436
+         BLANK LINE+1,132                                               3.1  437
+         MVC   LINE+7+00(3),=CL3'---'                                   3.1  438
+         MVC   LINE+7+03(6),=X'402020202120'                            3.1  439
+         MVC   LINE+7+09(33),=CL33' MATCHING RECORDS NOT PRINTED ---'   3.1  440
+         CVD   R0,TEMP8                                                 3.1  441
+         ED    LINE+7+03(6),TEMP8+5                                     3.1  442
+         PUTMSG ,                                                       4.0--078
+*** PRINT LEADING CONTEXT LINES                                         3.1  445
+EQLEAD   LTR   R1,RINCR                                                 3.1  446
+         BNP   EQLEAD8                 SKIP IF LEADING=PREC.TRAILING C. 3.1  447
+         MR    R0,RLEN                                                  3.1  448
+         SLR   F1,R1                   SET BACK TO FIRST CONTEXT        3.1  449
+         SLR   F2,R1                   RECORD IN BOTH FILES.            3.1  450
+*                                                                       3.1  451
+EQLEAD1  PUTEQ ,                                                        4.0--079
+         ADVNC F1                                                       3.1  456
+         ADVNC F2                                                       3.1  457
+         BCT   RINCR,EQLEAD1                                            3.1  458
+*   F1,F2 NOW AGAIN POINTING TO STOP RECORDS                            3.1  459
+EQLEAD8  CKEOF F1,EOF=EXHF1C           B.TO EXHAUSTED IF EOF REACHED    4.0--080
+         CKEOF F2,EOF=EXHF2C           IN ANY FILE.                     4.0--081
+         B     NOTEQUAL                ELSE STOP COND WAS 'NOT EQUAL'.  3.1  462
+         TITLE 'CTFUW -- ATTEMPT TO SYNCHRONISE'                        4.0--082
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 4.0--083
+* PRESCAN TO RE-SYNCHRONISE FILES                                     * 4.0--084
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 4.0--085
+NOTEQUAL ST    F1,F1SAVE               SAVE BOTTOM                      4.0--086
+         ST    F2,F2SAVE                                                4.0--087
+         LR    F1P,F1                  HI-WATER MARK                    4.0--088
+         LR    F2P,F2                                                   4.0--089
+* GET NEW F1-RECORD INTO F1P; TEST AGAINST ALL F2-RECORD(F2SAVE - F2P)  4.0--090
+PREADV1  ADVNC F1P,EOF=EOFADV1                                          4.0--091
+PRECOMP1 L     F2,F2SAVE                                                4.0--092
+CLC12    CLC   0(*-*,F1P),0(F2)                                         4.0--093
+         BE    IN1FND                                                   4.0--094
+BXLE1    BXLE  F2,LEN2,CLC12                                            4.0--095
+* GET NEW F2-RECORD INTO F2P; TEST AGAINST ALL F1-RECORD(F1SAVE - F1P)  4.0--096
+PREADV2  ADVNC F2P,EOF=EOFADV2                                          4.0--097
+PRECOMP2 L     F1,F1SAVE                                                4.0--098
+CLC21    CLC   0(*-*,F2P),0(F1)                                         4.0--099
+         BE    IN2FND                                                   4.0--100
+BXLE2    BXLE  F1,LEN1,CLC21                                            4.0--101
+         B     PREADV1                                                  4.0--102
+* MATCH IN FILE 1                                                       4.0--103
+IN1FND   STM   F2,F2P,HOOKSAVE                                          4.0--104
+         LR    F2P,F2                  F2P = F1P                        4.0--105
+         BAL   R14,PHOOK               TEST FOR REAL HOOK               4.0--106
+         LM    F2,F2P,HOOKSAVE         RESTORE AND                      4.0--107
+         B     BXLE1                   REGAIN LOOK-UP                   4.0--108
+* MATCH IN FILE 2                                                       4.0--109
+IN2FND   STM   F1,F1P,HOOKSAVE                                          4.0--110
+         LR    F1P,F1                  F1P = F2P                        4.0--111
+         BAL   R14,PHOOK               TEST FOR REAL HOOK               4.0--112
+         LM    F1,F1P,HOOKSAVE         RESTORE AND                      4.0--113
+         B     BXLE2                   REGAIN LOOK-UP                   4.0--114
+* EOF IN FILE 1: IF EOF IN FILE 2, DISPLAY; ELSE RESET F1P              4.0--115
+EOFADV1  ADVNC F2P,EOF=PINS                                             4.0--116
+         SLR   F1P,LEN1                                                 4.0--117
+         B     PRECOMP2                                                 4.0--118
+* EOF IN FILE 2: IF EOF IN FILE 1, DISPLAY; ELSE RESET F1P              4.0--119
+EOFADV2  ADVNC F1P,EOF=PINS                                             4.0--120
+         SLR   F2P,LEN2                                                 4.0--121
+         B     PRECOMP1                                                 4.0--122
+         SPACE 1                                                        4.0--123
+* FOUND A NEW MATCH: TEST FOR REACHING HOOK LENGTH                      4.0--124
+PHOOK    LR    F1,F1P                  -> NEW MATCH                     4.0--125
+         LR    F2,F2P                  -> NEW MATCH                     4.0--126
+         L     RCOMP,KHOOK             REQUIRED HOOK SIZE               4.0--127
+PHOOK1   SH    RCOMP,=H'1'                                              4.0--128
+         BNP   PINS                    HOOK SIZE REACHED IF EXHAUSTED   4.0--129
+         ADVNC F1,EOF=PINS                                  EOF FILE 1  4.0--130
+         ADVNC F2,EOF=PINS                                  EOF FILE 2  4.0--131
+         EX    0,CLCEQ                                                  4.0--132
+         BE    PHOOK1                  LOOP                             4.0--133
+         BR    R14                     HOOK SIZE NOT REACHED            4.0--134
+         TITLE 'CTFUW -- DISPLAY NON-MATCHING RECORDS'                  4.0--135
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 4.0--136
+* DISPLAY NON-MATCHING RECORDS OF FILE1 FROM F1SAVE UP TO F1P         * 4.0--137
+*                              OF FILE2 FROM F2SAVE UP TO F2P         * 4.0--138
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 4.0--139
+PINS     L     F1,F1SAVE                                                3.1  541
+         L     F2,F2SAVE                                                3.1  542
+         SPACE 1                                                        3.1  543
+*   WRITE 'NEARLY EQUAL' RECORDS                                        3.1  544
+PINS0    CLR   F1,F1P                  MATCH POSITION REACHED?          3.1  545
+         BNL   PINS1                                                    3.1  546
+         CLR   F2,F2P                  MATCH POSITION REACHED?          3.1  547
+         BNL   PINS1                                                    3.1  548
+         BAL   R14,QUITEEQ             CHECK FOR NEAR-EQUAL             3.1  549
+         CH    R15,=H'10'              NUMBER OF DIFFERENT CHARS        3.1  550
+         BNL   PINS1                   STOP IF TOO MUCH.                3.1  551
+         LTR   R15,R15                 THESE HAPPEN TO BE IDENTICAL ?   3.1  552
+         BNZ   PINS0B                  (MAY OCCUR DUE TO HOOK SIZE)     3.1  553
+         PUTEQ ,                       DISPLAY THEM AS EQUAL            4.0--140
+         B     PINS0P1                 DISPLAY THEM AS EQUAL.           3.1  555
+PINS0B   CVD   R15,TEMP8                                                3.1  556
+         MVC   PINSSAVE(4),=X'40202120'                                 3.1  557
+         ED    PINSSAVE(4),TEMP8+6                                      3.1  558
+         MVC   PINSSAVE+1(1),PINSSAVE+3                                 3.1  559
+         MVI   PINSSAVE+2,C'?'                                          3.1  560
+         MVI   PINSSAVE+3,C' '                                          3.1  561
+         PUTQEQ ,                      INDICATE 'QUITE EQUAL'           3.1  562
+PINS0P1  ALR   F1,RLEN                                                  3.1  566
+         ALR   F2,RLEN                                                  3.1  567
+         B     PINS0                                                    3.1  568
+*   WRITE FILE 1 RECORDS 'INSERTED' (F1) TO (F1P-RLEN)                  3.1  569
+PINS1    CLR   F1,F1P                  MATCH POSITION REACHED?          3.1  570
+         BNL   PINS2                   END LOOP IF YES.                 3.1  571
+         PUTINS1 ,                                                      4.0--141
+         ALR   F1,RLEN                                                  3.1  575
+         B     PINS1                                                    3.1  576
+*   WRITE FILE 2 RECORDS 'INSERTED' (F2) TO (F2P-RLEN)                  3.1  577
+PINS2    CLR   F2,F2P                  MATCH POSITION REACHED?          3.1  578
+         BNL   PINS9                   END LOOP IF YES.                 3.1  579
+         PUTINS2 ,                                                      4.0--142
+         ALR   F2,RLEN                                                  3.1  583
+         B     PINS2                                                    3.1  584
+*   AT NEW MATCH POINT IN BOTH FILES: (F1,F2) (=(F1P,F2P))              3.1  585
+PINS9    CKEOF F1,EOF=EXHF1C                                            4.0--143
+         CKEOF F2,EOF=EXHF2C                                            4.0--144
+         B     TESTEQ                  WRITE MATCHING RECORDS AND CONT. 3.1  587
+         TITLE 'CTFUW -- EOF HANDLING, TERMINATION, ERROR PROCESSING'   4.0--145
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 4.0--146
+* EOF HANDLING                                                        * 4.0--147
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 4.0--148
+EXHF1    ADVNC F2                      ON EOF IN FILE 1, ADVANCE FILE 2 4.0--149
+EXHF1C   CKEOF F2,EOF=EOF                                               4.0--150
+         B     EXHF1F2                                                  4.0--151
+         SPACE 1                                                        4.0--152
+EXHF2    ADVNC F1                      ON EOF IN FILE 2, ADVANCE FILE 1 4.0--153
+EXHF2C   CKEOF F1,EOF=EOF                                               4.0--154
+EXHF1F2  L     F1P,TAB1END             SET VIRTUAL MATCH ON END OF      4.0--155
+         L     F2P,TAB2END             BOTH FILES                       4.0--156
+         B     PINS0                   AND OUTPUT THE REST              4.0--157
+         SPACE 1                                                        3.1  631
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  632
+*   EOF REACHED IN BOTH FILES, PROCESSING COMPLETE                    * 3.1  633
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  634
+EOF      BLANK LINE+1,132                                               3.1  635
+         MVC   LINE+7+00(20),=CL20'---ENDS OF FILES---'                 3.1  636
+         PUTMSG ,                                                       4.0--158
+ENDPGM   DS    0H                                                       3.1  640
+         AIF   (&IBM).I6                                                3.1  641
+         TERM  ,                                                    SIE 3.1  642
+         AGO   .C6                                                      3.1  643
+.I6      ANOP                                                       IBM 3.1  644
+         CLOSE SYSPRINT                                             IBM 3.1  645
+         EPILOG SA=S,RC=0                                           IBM 3.1  646
+.C6      ANOP                                                           3.1  647
+         SPACE 2                                                        4.0--159
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  649
+*   PARAMETER ERROR                                                   * 3.1  650
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  651
+ERRPARM  DS    0H                                                       3.1  652
+         BLANK LINE+1,132                                               3.1  653
+         MVC   LINE+1(35),=CL35'*** PARAMETER ERROR. TERMINATED ***'    3.1  654
+         PUTMSG ,                                                       4.0--160
+         B     ENDPGM                                                   3.1  657
+         AIF   (&IBM).I65                                               3.1  658
+         SPACE 4                                                    SIE 3.1  659
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  660
+*   READ ERROR (UNKNOWN RC)                                           * 3.1  661
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  662
+ERRREAD  DS    0H                                                   SIE 3.1  663
+         BLANK LINE+1,132                                           SIE 3.1  664
+         MVC   LINE+1(35),=CL35'*** READ ERROR     . TERMINATED ***'    3.1  665
+         PUTMSG ,                                                       4.0--161
+         B     ENDPGM                                               SIE 3.1  668
+         SPACE 4                                                    SIE 3.1  669
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  670
+*   WROUT/WRLST ERROR                                                 * 3.1  671
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  672
+ERRWROUT DS    0H                                                   SIE 3.1  673
+         BKPT                                                       SIE 3.1  674
+         BR    R14                                                  SIE 3.1  675
+.I65     ANOP                                                       IBM 3.1  676
+         TITLE 'CTFUW    -- SUBROUTINES'                                3.1  677
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  678
+*   QUITEEQ - COUNT NUMBER OF CHARACTER POSITIONS DIFFERENT IN        * 3.1  679
+*             CURRENT F1/F2 RECORDS                                   * 3.1  680
+*                                                                     * 3.1  681
+*INPUT:  (F1),(F2),(RLEN)                                             * 3.1  682
+*OUTPUT: (R15)   : DIFFERENCE COUNT                                   * 3.1  683
+*EXIT:   (R14)                                                        * 3.1  684
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  685
+QUITEEQ  DS    0H                                                       3.1  686
+         BCTR  F1,0                                                     3.1  687
+         BCTR  F2,0                    BACK FOR BETTER INDEXING         3.1  688
+         SR    R15,R15                 COUNTER = 0.                     3.1  689
+         SR    R0,R0                                                    3.1  690
+         SR    R1,R1                                                    3.1  691
+         LR    R2,RLEN                                                  3.1  692
+QQ1      IC    R0,0(R2,F1)                                              3.1  693
+         IC    R1,0(R2,F2)                                              3.1  694
+         CLR   R0,R1                                                    3.1  695
+         BE    *+8                                                      3.1  696
+         LA    R15,1(,R15)                                              3.1  697
+         BCT   R2,QQ1                  LOOP OVER RECORD                 3.1  698
+         LA    F1,1(,F1)                                                3.1  699
+         LA    F2,1(,F2)               TRUE VALUES AGAIN                3.1  700
+         BR    R14                                                      3.1  701
+         EJECT                                                          3.1  702
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  703
+*   PUT1 - PUT FILE A RECORD INTO LINE                                * 3.1  704
+*                                                                     * 3.1  705
+*INPUT:  (F1)                                                         * 3.1  706
+*EXIT:   (R14)                                                        * 3.1  707
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  708
+PUT1     DS    0H                                                       3.1  709
+         TM    PUTFLAG,PUT#FULL                                         3.1  710
+         BO    PUT1F                   B.IF FULL FORMAT                 3.1  711
+*   COMPACT-FORMAT OUTPUT                                               3.1  712
+PUT1MVC2 MVC   LINE+7(*-*),0(F1)                                        3.1  713
+         BR    R14                                                      3.1  714
+*   FULL-FORMAT OUTPUT                                                  3.1  715
+PUT1F    EQU   *                                                        3.1  716
+PUT1MVC1 MVC   LINETEXT(*-*),0(F1)     INSERT RECORD                    3.1  717
+         OI    PUTFLAG,PUT#1                                            3.1  718
+*   COMPUTE RECORD NUMBER AND INSERT                                    3.1  719
+         LA    R0,0(RLEN,F1)                                            3.1  720
+         SL    R0,TAB1A                                                 3.1  721
+         SRDL  R0,32                                                    3.1  722
+         DR    R0,RLEN                                                  3.1  723
+         CVD   R1,TEMP8                RECORD NUMBER (1..)              3.1  724
+         MVC   LINEF1CT,=X'402020202120'                                3.1  725
+         ED    LINEF1CT,TEMP8+5                                         3.1  726
+         BR    R14                                                      3.1  727
+         SPACE 2                                                        3.1  728
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  729
+*   PUT2 - PUT FILE B RECORD INTO LINE                                * 3.1  730
+*                                                                     * 3.1  731
+*INPUT:  (F2)                                                         * 3.1  732
+*EXIT:   (R14)                                                        * 3.1  733
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --* 3.1  734
+PUT2     DS    0H                                                       3.1  735
+         TM    PUTFLAG,PUT#FULL                                         3.1  736
+         BO    PUT2F                   B.IF FULL FORMAT                 3.1  737
+*   COMPACT-FORMAT OUTPUT                                               3.1  738
+PUT2MVC2 MVC   LINE+7+60+4(*-*),0(F2)                                   3.1  739
+         BR    R14                                                      3.1  740
+*   FULL-FORMAT OUTPUT                                                  3.1  741
+PUT2F    TM    PUTFLAG,PUT#1           'PUT1' ALREADY IN THIS LINE?     3.1  742
+         BZ    PUT2A                   B.IF NO, ROOM ENOUGH.            3.1  743
+         TM    PUTFLAG,PUT#EQ          ARE F1 AND F2 RECORDS EQUAL?     3.1  744
+         BO    PUT2EQ                  YES, SAVE SECOND DISPLAY OF IT.  3.1  745
+         ST    R14,PUTSAVE1                                             3.1  746
+         BAL   R14,PUTOUT              GET FRESH LINE                   3.1  747
+         L     R14,PUTSAVE1                                             3.1  748
+PUT2A    EQU   *                                                        3.1  749
+PUT2MVC1 MVC   LINETEXT(*-*),0(F2)     INSERT RECORD                    3.1  750
+         OI    PUTFLAG,PUT#2                                            3.1  751
+         B     PUT2N                                                    3.1  752
+*   FILE2 RECORD EQUAL TO FILE1 RECORD                                  3.1  753
+PUT2EQ   MVI   LINEEQ+1,C'='                                            3.1  754
+*   COMPUTE RECORD NUMBER AND INSERT                                    3.1  755
+PUT2N    LA    R0,0(RLEN,F2)                                            3.1  756
+         SL    R0,TAB2A                                                 3.1  757
+         SRDL  R0,32                                                    3.1  758
+         DR    R0,RLEN                                                  3.1  759
+         CVD   R1,TEMP8                RECORD NUMBER (1..)              3.1  760
+         MVC   LINEF2CT,=X'402020202120'                                3.1  761
+         ED    LINEF2CT,TEMP8+5                                         3.1  762
+         BR    R14                                                      3.1  763
+         SPACE 4                                                        3.1  764
+*********************************************************************** 3.1  765
+*   PUTOUT - WRITE 'LINE' TO OUTPUT                                   * 3.1  766
+*                                                                     * 3.1  767
+*INPUT:  LINE    : PRINT LINE (L' IS 133, LINE-4 IS V-RECORD WORD)    * 3.1  768
+*                                                                     * 3.1  769
+*EXIT:   (R14)                                                        * 3.1  770
+*********************************************************************** 3.1  771
+PUTOUT   ST    R14,PUTSAVE0                                             3.1  772
+         TM    PUTFLAG,PUT#MSG         AS-IS LINE?                      3.1  773
+         BO    PUTOUT4                 YES, RAUS DAMIT.                 3.1  774
+         AP    PUTCOUNT,=P'1'          INCREMENT LINE NUMBER            3.1  775
+         TM    PUTFLAG,PUT#FULL                                         3.1  776
+         BO    PUTOUT4                 SKIP IF FULL-FORMAT              3.1  777
+*   COMPACT-FORMAT OUTPUT: INSERT LINE COUNTER, COMPARE-TEXT            3.1  778
+         MVC   LINE+0(6),=X'402020202120'                               3.1  779
+         ED    LINE+0(6),PUTCOUNT                                       3.1  780
+         SR    R15,R15                                                  3.1  781
+         IC    R15,PUTFLAG                                              3.1  782
+         SRL   R15,4                   GET CONDITION FLAGS ALONE        3.1  783
+         SLL   R15,2                   THEIR VALUE *4                   3.1  784
+         LA    R15,PUTCTEXT(R15)                                        3.1  785
+         MVC   LINE+7+60(4),0(R15)                                      3.1  786
+*                                                                       3.1  787
+PUTOUT4  CP    PUTCOUNT,LINECT         NEW PAGE REQUIRED?               3.1  788
+         BNH   PUTOUT5                 SKIP IF NOT.                     3.1  789
+         MVC   LINE(1),MSGEJECT+4      CCC FOR NEW PAGE                 3.1  790
+         AP    LINECT,=P'60'           NEXT ALERT VALUE.                3.1  791
+PUTOUT5  LA    R0,4+L'LINE             TOTAL LENGTH                     3.1  792
+         STH   R0,LINE$                                                 3.1  793
+         AIF   (&IBM).I72                                               3.1  794
+         TM    OPTFLAG,OPT#WLST                                     SIE 3.1  795
+         BO    PUTOUT6L                                             SIE 3.1  796
+         WROUT LINE$,ERRWROUT                                       SIE 3.1  797
+         B     PUTOUT6Z                                             SIE 3.1  798
+PUTOUT6L WRLST LINE$,ERRWROUT                                       SIE 3.1  799
+PUTOUT6Z EQU   *                                                    SIE 3.1  800
+         AGO   .C72                                                 SIE 3.1  801
+.I72     ANOP                                                       IBM 3.1  802
+         PUT   SYSPRINT,LINE$                                           3.1  803
+.C72     ANOP                                                           3.1  804
+         MVI   LINE,C' '                                                3.1  805
+         MVC   LINE+1(132),LINE        BLANK PRINT LINE                 3.1  806
+         TM    PUTFLAG,PUT#FULL                                         3.1  807
+         BNO   PUTOUT7                 SKIP UNLESS FULL-FORMAT          3.1  808
+         MVC   LINEF1CT,=C' -----'                                      3.1  809
+         MVC   LINEF2CT,LINEF1CT                                        3.1  810
+PUTOUT7  NI    PUTFLAG,PUT#FULL                                         3.1  811
+         L     R14,PUTSAVE0                                             3.1  812
+         BR    R14                                                      3.1  813
+         SPACE 4                                                        3.1  834
+         BTXCODE MF=SUBR                                                3.1  835
+         BTXCVB MF=SUBR                                                 3.1  836
+         TITLE 'CTFUW   -- DATA'                                        3.1  837
+         LTORG                                                          3.1  838
+         PRINT NOGEN                                                    3.1  839
+         AIF   (&IBM).I8                                                3.1  840
+MSGEJECT TEXT  V,X'C1',' '                                          SIE 3.1  841
+MSGOPT1  TEXT  V,X'40','SPECIFY RECORD WINDOW: START,LENGTH,S2,L2,...'  3.1  842
+MSGOPT2  TEXT  V,X'40',' ...,HOOK=2/N,CONTEXT=0/N,COMPRESS=NO/YES,FORMA-3.1  843
+               T=STD/FULL,W=OUT/LST'                                    3.1  844
+MSGIN    TEXT  V,CL64' '                                            SIE 3.1  845
+MSGFILE  TEXT  V,X'40','ISSUE SYSFILE SYSDTA= COMMAND'              SIE 3.1  846
+         AGO   .C8                                                  SIE 3.1  847
+.I8      ANOP                                                       IBM 3.1  848
+MSGEJECT TEXT  V,C'1 '                                                  3.1  849
+MSGLONG  TEXT  ,'FILE1 TOO LONG. REMAINING RECORDS NOT COMPARED'    IBM 3.1  850
+*                                                                       3.1  851
+FILE     DCB   DDNAME=FILE1,MACRF=(GL),DSORG=PS,EODAD=EOFFILE,         -3.2--057
+               BUFNO=1                                              IBM 3.1  853
+SYSPRINT DCB   DDNAME=SYSPRINT,MACRF=(PM),RECFM=VBA,LRECL=137,BLKSIZE=0-3.1  854
+               141,DSORG=PS,BUFNO=1                                 IBM 3.1  855
+.C8      ANOP                                                           3.1  856
+         SPACE 1                                                        3.1  857
+SAVEAREA DC    18F'0'                                                   3.1  858
+TEMP8    DS    D                                                        3.1  859
+TEMP4    DS    F                                                        3.1  860
+F1SAVE   DS    A                                                        3.1  861
+F2SAVE   DS    A                                                        3.1  862
+HOOKSAVE DS    3A                                                       4.0--162
+         SPACE 1                                                        3.1  867
+*** PROCESSING OPTIONS                                                  3.1  868
+OPTFLAG  DC    B'0'                                                     3.1  869
+OPT#COMP   EQU   X'01'                   COMPRESS=YES                   3.1  870
+OPT#WLST   EQU   X'40'                   W=LST                          3.1  871
+         SPACE 1                                                        3.1  872
+*** SCAN DATA                                                           3.1  873
+SCANPARM PARM  (BUFFER,TEMP4,POSLIST,KEYLIST),,VL,MF=L                  3.1  874
+POSLIST  DC    FL1'8',FL3'0'           MAX 4 OFFSET,LENGTH PAIRS        3.1  875
+         DC    8F'0'                                                    3.1  876
+KEYLIST  DC    AL1(#KEYDEF),AL3(KEYDEF)                                 3.1  877
+KFORMAT  DC    A(0)                    FORMAT=<CODE>                    3.1  878
+KHOOK    DC    F'0'                    HOOK=<INTEGER>                   3.1  879
+KCONTEXT DC    F'0'                    CONTEXT=<INTEGER>                3.1  880
+KCOMPR   DC    A(0)                    COMPRESS=<CODE>                  3.1  881
+KW       DC    A(0)                    W=OUT/LST                        3.1  882
+*                                                                       3.1  883
+KEYDEF   BTXCODE (FORMAT,HOOK,CONTEXT,COMPRESS,W),COUNT=#,MF=L          3.1  884
+CFORMAT  BTXCODE (STD,FULL),MF=L                                        3.1  885
+CCOMPR   BTXCODE (NO,YES,N,Y),MF=L                                      3.1  886
+CW       BTXCODE (OUT,LST),MF=L                                         3.1  887
+         SPACE 1                                                        3.1  888
+*** FIELDS SELECTOR CONSTRUCTED FROM PARM SPECIFICATIONS                3.1  889
+SELECTOR DS    XL256                   (RLEN) BYTES USED                3.1  890
+         SPACE 1                                                        4.0--163
+*  PRINT ROUTINE DATA                                                   4.0--164
+*                                                                       3.1  814
+PUTCTEXT DS    0F                      CONDITION-CODE TEXTS             3.1  815
+PINSSAVE DS    F                       PUT#QUEQ (SET IN 'PINS0')        3.1  816
+         DC    CL4' -> '               PUT#INS1                         3.1  817
+         DC    CL4' <- '               PUT#INS2                         3.1  818
+         DC    CL4' == '               PUT#EQ                           3.1  819
+*                                                                       3.1  820
+PUTCOUNT DC    PL3'0'                                                   3.1  821
+LINECT   DC    PL3'0'                                                   3.1  822
+PUTFLAG  DC    B'0'                                                     3.1  823
+PUT#EQ     EQU   X'30'                 ..XX .... MATCH                  3.1  824
+PUT#INS1   EQU   X'10'                           FILE1 INSERT           3.1  825
+PUT#INS2   EQU   X'20'                           FILE2 INSERT           3.1  826
+PUT#QUEQ   EQU   X'00'                           NOT SO DIFFERENT       3.1  827
+PUT#FULL   EQU   X'08'                   FULL-FORMAT OUTPUT             3.1  828
+PUT#MSG    EQU   X'04'                   MSG LINE (NO EDITING)          3.1  829
+PUT#1      EQU   X'01'                   'PUT1' IN THIS LINE            3.1  830
+PUT#2      EQU   X'02'                   'PUT2' IN THIS LINE            3.1  831
+PUTSAVE0 DS    A                                                        3.1  832
+PUTSAVE1 DS    A                                                        3.1  833
+         SPACE 1                                                        3.1  891
+*** PRINT LINE                                                          3.1  892
+LINE$    DC    Y(4+L'LINE,0)                                            3.1  893
+LINE     DC    CL133' '                                                 3.1  894
+         ORG   LINE+1                                                   3.1  895
+LINEF1CT DS    CL6' -----'                                              3.1  896
+         DS    C' '                                                     3.1  897
+LINEEQ   DS    CL3'   '                                                 3.1  898
+         DS    C' '                                                     3.1  899
+LINEF2CT DS    CL6' -----'                                              3.1  900
+         DS    CL3'   '                                                 3.1  901
+LINETEXT DS    0C                                                       3.1  902
+         ORG   ,                                                        3.1  903
+*                                                                       3.1  904
+         DS    0D                                                       3.1  905
+BUFFER   TEXT  ,CL256                                                   3.1  906
+*                                                                       3.1  907
+TAB1A    DC    A(*-*)                  AREA 1: START                    3.1  908
+TAB1END  DC    A(*-*)                          END                      3.1  909
+TAB2A    DC    A(*-*)                  AREA 2: START                    3.1  910
+TAB2END  DC    A(*-*)                          END                      3.1  911
+         AIF   (NOT &IBM).C9                                            3.1  912
+         ORG   TAB1A            OVERLAY FOR GETMAIN VC              IBM 3.1  913
+         DC    A(*-*)               A: START OF GOTTEN CORE         IBM 3.1  914
+         DC    A(*-*)                  LENGTH OF GOTTEN CORE        IBM 3.1  915
+         DC    A(4*1024+4*1024)    LA: MINIMUM LENGTH               IBM 3.1  916
+         DC    A(X'FFFFF8')            MAXIMUM LENGTH               IBM 3.1  917
+         ORG   ,                END OF OVERLAY                      IBM 3.1  918
+         SPACE 1                                                    IBM 3.1  919
+         PRINT NOGEN                                                IBM 3.1  920
+         DCBD  DSORG=QS,DEVD=DA                                     IBM 3.1  921
+         SPACE 1                                                    IBM 3.1  922
+.C9      ANOP                                                           3.1  923
+         SPACE 2                                                        3.1  924
+         END                                                            3.1  925

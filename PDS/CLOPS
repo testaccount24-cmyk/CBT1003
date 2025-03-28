@@ -1,0 +1,152 @@
+CLOPS    TITLE 'CLOPS  --  OPENS AND CLOSES A DATA SET'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+* COPYRIGHT: COPYRIGHT BY GESELLSCHAFT FUER MATHEMATIK UND            *
+*                                      DATENVERARBEITUNG MBH BONN,    *
+*                         - RECHENZENTREN -                           *
+*                         SCHLOSS BIRLINGHOVEN                        *
+*                         5205 ST. AUGUSTIN 1                         *
+*                                                                     *
+*            FURTHER COPIES OF THIS PROGRAM MAY BE OBTAINED           *
+*            BY WRITING TO THE ABOVE ADDRESS.                         *
+*                                                                     *
+*                                                                     *
+*                                                                     *
+*        C L O P S                                                    *
+*                                                                     *
+*                                                                     *
+* <CLASS>:  UTILITY                                                   *
+*                                                                     *
+*                                                                     *
+* <FUNCTION/OPERATION>:  CLOPS OPENS A DATA SET FOR OUTPUT WITH       *
+*        DISP=MOD AND CLOSES IT AGAIN. THIS CAUSES THE DSCB TO BE     *
+*        WRITTEN BACK INCLUDING MODIFICATIONS SPECIFIED IN THE        *
+*        DD STATEMENT - E.G. EXPIRATION DATE.                         *
+*                                                                     *
+*                                                                     *
+* <ENTRY POINTS>:  CLOPS                                              *
+*                                                                     *
+*                                                                     *
+* <INPUT>:  NONE                                                      *
+*                                                                     *
+*                                                                     *
+* <OUTPUT>:  NONE                                                     *
+*                                                                     *
+*                                                                     *
+* <DD-STATEMENTS/DATA SETS>:  CLOPS - SPECIFIES THE DATA SET TO BE    *
+*                                     OPENED AND CLOSED               *
+*                                                                     *
+*                                                                     *
+* <NORMAL EXIT>:  RETURN VIA REGISTER 14                              *
+*                                                                     *
+*                                                                     *
+* <ERROR EXIT>:  RETURN VIA REGISTER 14                               *
+*                                                                     *
+*                                                                     *
+* <RETURN CODES>:  0 - SUCCESSFUL COMPLETION                          *
+*                  4 - DD STATEMENT MISSING                           *
+*                                                                     *
+*                                                                     *
+* <EXTERNAL ROUTINES>:  NONE                                          *
+*                                                                     *
+*                                                                     *
+* <TABLES/WORK AREAS>:  JFCB                                          *
+*                                                                     *
+*                                                                     *
+* <ATTRIBUTES>:  REUSABLE                                             *
+*                                                                     *
+*                                                                     *
+* <RESTRICTIONS>:  NONE                                               *
+*                                                                     *
+*                                                                     *
+* <AUTHORIZATION REQUIRED>:  NONE                                     *
+*                                                                     *
+*                                                                     *
+* <RELATED PROGRAMS>:  IEFBR14 - USED TO ALLOCATE AND DELETE DATA SETS*
+*                                                                     *
+*                                                                     *
+* <STORAGE>:                                                          *
+*        PROGRAM:  400 BYTES                                          *
+*        DYNAMIC:  --                                                 *
+*        BUFFER :  --                                                 *
+*                                                                     *
+*                                                                     *
+* <LOAD MODULE CREATION>:                                             *
+*      SOURCE LANGUAGE      :  VS ASSEMBLER                           *
+*      COMPILE LIBRARIES    :  SYS1.MACLIB, RZ.MACLIB                 *
+*      COMPILE PARAMETERS   :  --                                     *
+*      LINK-EDIT LIBRARIES  :  --                                     *
+*      LINK-EDIT PARAMETERS :  REUS                                   *
+*      LINK-EDIT INPUT      :  --                                     *
+*      DESTINATION LIBRARIES:  GMD.GOLIB                              *
+*                                                                     *
+*      GENERATING DECK      :  GMD.JCL(CLOPS)                         *
+*                                                                     *
+*                                                                     *
+* <STATUS>:                                                           *
+*          CHANGE LEVEL - 0.0               11MAY76                   *
+*                                                                     *
+*                                                                     *
+* <NOTES>:  PROCEDURE :  NONE                                         *
+*           SAMPLE JOB:  NONE                                         *
+*                                                                     *
+*           EXAMPLE:     //CLOPS   EXEC  PGM=CLOPS                    *
+*                        //CLOPS     DD  .....ANYTHING.....           *
+*                                                                     *
+*           CAUTION:     LABEL=EXPDT=00000 IS INTERPRETED AS 'NOT     *
+*                        SPECIFIED'. USE LABEL=EXPDT=00001 INSTEAD.   *
+*                                                                     *
+*                                                                     *
+* <AUTHOR>:  V. BLASIUS, GMD-RZ.BN                                    *
+*                                                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         TITLE 'DSECT DEFINITIONS FOR THIS PROGRAM'
+         PRINT NOGEN
+JFCB     DSECT
+         IEFJFCBN                  JFCB DESCRIPTION
+         TITLE 'EQU DEFINITIONS FOR THIS PROGRAM'
+CLOPS    CSECT
+         SPACE 3
+R0       EQU   0                   PARAMETER AND WORK REGISTER
+R1       EQU   1                   PARAMETER AND WORK REGISTER
+R2       EQU   2                   NOT USED
+R3       EQU   3                   NOT USED
+R4       EQU   4                   NOT USED
+R5       EQU   5                   NOT USED
+R6       EQU   6                   NOT USED
+R7       EQU   7                   NOT USED
+R8       EQU   8                   NOT USED
+R9       EQU   9                   NOT USED
+R10      EQU   10                  BASE REGISTER FOR PROGRAM
+R11      EQU   11                  NOT USED
+R12      EQU   12                  NOT USED
+R13      EQU   13                  BASE REGISTER FOR SAVE AREA
+R14      EQU   14                  LINK AND WORK REGISTER
+R15      EQU   15                  LINK AND WORK REGISTER
+         TITLE '--  OPENS AND CLOSES A DATA SET'
+         PROLOG ID='CLOPS-0.0-11MAY76-BLASIUS',SSA=*
+         RDJFCB DCB                READ JOB FILE CONTROL BLOCK
+         LTR   R15,R15             OK ?
+         BNZ   EPILOG              NO, DD STATEMENT MISSING, RC=4
+         LA    R1,JFCBBUF
+         USING JFCB,R1             SYMBOLIC ADDRESSABILITY FOR JFCB
+         NI    JFCBIND2,X'FF'-JFCDISP   CLEAR DISPOSITION FIELD
+         OI    JFCBIND2,JFCMOD     SET DISPOSITION TO MOD
+         DROP  R1
+         OPEN  (DCB,OUTPUT),TYPE=J
+         CLOSE DCB
+         SR    R15,R15             NORMAL RETURN CODE = 0
+EPILOG   EPILOG RC=(15),SA=S       RETURN TO CALLER
+         SPACE 5
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        CONSTANTS AND AREAS                                          *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE 3
+DCB      DCB   DDNAME=CLOPS,DSORG=PS,MACRF=W,EXLST=EXLST
+         SPACE 3
+EXLST    DS    0A
+         DC    X'87',AL3(JFCBBUF)  EXIT LIST
+         SPACE 3
+JFCBBUF  DS    XL176               AREA FOR JFCB
+         SPACE 3
+         END CLOPS
