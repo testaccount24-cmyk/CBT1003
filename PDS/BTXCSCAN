@@ -1,0 +1,1148 @@
+         TITLE 'BTXCSCAN - PARAMETER SCAN ROUTINE'
+         MACRO
+&LABEL   IF    &A,&REL,&B,&GOTO,&ADDR
+.*
+.*  TEST AND BRANCH
+.*
+         LCLC  &CC
+         AIF   ('&REL' NE ':' AND '&REL' NE '¬:').COMP
+.*
+.*  BIT TEST
+.*
+&LABEL   TM    &A,&B
+&CC      SETC  'O'
+         AIF   ('&REL' EQ ':').GOTO
+&CC      SETC  'Z'
+         AGO   .GOTO
+.*
+.*  COMPARISON
+.*
+.COMP    AIF   ('&B' EQ '0').ZEROTEST
+         CH    &A,=Y(&B)
+         AGO   .ALLCOMP
+.ZEROTEST ANOP
+&LABEL   LTR   &A,&A
+.ALLCOMP ANOP
+&CC      SETC  'Z'
+         AIF   ('&REL' EQ 'EQ' OR '&REL' EQ '=').GOTO
+&CC      SETC  'L'
+         AIF   ('&REL' EQ 'LT' OR '&REL' EQ '<').GOTO
+&CC      SETC  'P'
+         AIF   ('&REL' EQ 'GT' OR '&REL' EQ '>').GOTO
+&CC      SETC  'NZ'
+         AIF   ('&REL' NE 'NE' AND '&REL' NE '¬=').YY
+.*
+.GOTO    AIF   ('&GOTO' EQ 'GOTO').GOTO1
+         BMCERMAC IF,23,GOTO,&GOTO,GOTO
+.GOTO1   AIF   ('&ADDR'(1,1) EQ '(').GOTOR
+         B&CC  &ADDR
+         MEXIT
+.GOTOR   B&CC.R &ADDR(1)
+         MEXIT
+.*
+.YY      BMCERMAC IF,0
+         MEND
+         MACRO
+&LABEL   LSV   &REGA,&REGL,&ADDR
+.*
+         AIF   ('&REGA' EQ '' OR '&REGL' EQ '' OR '&ADDR' EQ '').Y1
+         AIF   ('&REGA' EQ '&REGL').Y2
+         AIF   ('&REGL' EQ '0' OR '&REGL' EQ 'R0').R0
+&LABEL   L     &REGL,&ADDR
+         LA    &REGA,0(,&REGL)         STRING ADDR (PURE)
+         SRL   &REGL,24                STRING LENGTH
+         MEXIT
+.R0      ANOP
+&LABEL   L     &REGA,&ADDR
+         LR    &REGL,&REGA
+         LA    &REGA,0(,&REGA)         STRING ADDR (PURE)
+         SRL   &REGL,24                STRING LENGTH
+         MEXIT
+.Y1      BMCERMAC LSP,001,,,,&LABEL
+         MEXIT
+.Y2      BMCERMAC LSP,067,FIRST,SECOND,,&LABEL
+         MEND
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+*        BTXCSCAN - PARAMETER SCAN ROUTINE                            *
+*                                                                     *
+*FUNCTION/OPERATION:                                                  *
+*        THIS ROUTINE SEPARATES AN INPUT STRING INTO PARAMETERS.      *
+*        THE RULES WHICH STRINGS ARE LEGAL PARAMETERS ARE THE STANDARD*
+*        OS/360 JCL AND MACRO LANGUAGE RULES.                         *
+*        IF THE STANDARD SET OF DELIMITERS SEEMS TO BE NOT SUITABLE,  *
+*        IT CAN BE REPLACED BY ANY NEW SET.                           *
+*                                                                     *
+*OPERATION:                                                           *
+*        THE PROGRAM SCAN THE INPUT STRING FROM LEFT TO RIGHT, ACTING *
+*        UPON PARAMETER SEPARATORS (COMMA) AND KEYWORD INDICATIONS    *
+*        (EQSIGN).  IT THEREBY HONOURS WELL-FORMED QUOTED STRINGS     *
+*        AND BALANCED PARENTHESES IN THE FOLLOWING WAY:               *
+*        AFTER AN OPENING QUOTE, NO CHARACTER HAS A SYNTACTICAL       *
+*        MEANING (I.E. IS ALWAYS TAKEN AS TEXT=VALUE CHARACTER) UP    *
+*        TO THE CLOSING (PAIRING) QUOTE.                              *
+*        AFTER A LEFT PARENTHESIS, COMMA AND EQSIGN DO NOT FUNCTION   *
+*        AS DELIMITERS (TAKEN AS TEXT=VALUE CHARACTER) UNTIL THE      *
+*        BALANCING RIGHT PARENTHESIS IS FOUND (INNER PARENTHESES      *
+*        ARE COUNTED, THE NUMBER OF LEFT PARENTHESES MAY NOT BE LESS  *
+*        THAN THE NUMBER OF RIGHT PARENTHESES).  EMBEDDED QUOTED      *
+*        STRINGS HAVE PRECEDENCE.  A BLANK WITHIN PARENTHESES (UNLESS *
+*        IN QUOTES, NATURALLY), TERMINATES THE SCAN AND THUS RESULTS  *
+*        IN SYNTAX ERROR (UNBALANCED LPAR).                           *
+*        (THE NOTATIONS BLANK, COMMA, EQSIGN ETC. NAME THE SYNTACTICAL*
+*        FUNCTION, NOT NECESSARY THE CHARACTERS -- IF THE DEFAULT     *
+*        DELIMITER SET IS NOT USED)                                   *
+*                                                                     *
+*        THE INPUT STRING IS DIVIDED INTO POSITIONAL AND KEYWORD      *
+*        OPERANDS, WHICH ARE OUTPUT IN SEPARATE OUTPUT LISTS.         *
+*                                                                     *
+*        THE BASIC DATA (DESCRIPTOR) ITEM FOR INPUT AND OUTPUT IS     *
+*        THE  "(SHORT) STRING POINTER" , A FULLWORD HAVING THE        *
+*        FORMAT  FL1'LEN-OF-STRING',AL3(ADDR-OF-STRING) .             *
+*        THIS ITEM IS SUPPORTED BY THE MACROS "LSV", "STSV"           *
+*        ANY MANY OTHER MACROS AND SUBROUTINES (CF. 'RELATED          *
+*        PROGRAMS').                                                  *
+*                                                                     *
+*                                                                     *
+*ENTRY POINT:     BTXCSCAN -- (STANDARD LINKAGE)                    2.0
+*                                                                     *
+*INPUT:  (R1)  POINTS TO A PARAMETER LIST OF 3 TO 5 ENTRIES:        2.0
+*                                                                     *
+*        +-----------+----------------------------------+          +2.0
+*        |  CONTIND  |      ->  256-BYTE WORKAREA       |          +2.0
+*        +-----------+----------------------------------+           2.0
+*        |  PTRTYPE  |      ->  INPUT STRING POINTER    |  - - -:   2.0
+*        +-----------+----------------------------------+       :   2.0
+*        |  (80)+GAP | 0 OR ->  POSITIONAL PAR OUTPUT L |       :   2.0
+*        +-----------+----------------------------------+       :   2.0
+*        |  (80)+IGN | 0 OR ->  KEYWORD PAR OUTPUT LIST |       :   3.0
+*        +-----------+----------------------------------+       :   2.0
+*        |    80     |      ->  DELIMITER SET           |       :   2.0
+*        +-----------+----------------------------------+       :     *
+*                                                               :     *
+*        +-----------+----------------------------------+       :     *
+*        | INPUT LEN |      ->  INPUT STRING            |  < - -:     *
+*        +-----------+----------------------------------+             *
+*                                                                     *
+*        OMISSION OF A PARAMETER IS INDICATED BY A ZERO ADDRESS,      *
+*        TRAILING PARAMETERS CAN BE OMITTED BY SHORTENING THE LIST.   *
+*           THE FIRST 2 PARAMETERS ARE MANDATORY;   AT LEAST        2.0
+*        ONE OF THE 3-RD AND 4-TH PARAMETER MUST BE SPECIFIED.      2.0
+*                                                                   2.0
+*        CONTFLAG:  0  FOR NORMAL CALL WITH NEW STRING TO BE SCANNE+2.0
+*             NON-ZERO FOR CONTINUATION CALL: CONTINUE TO SCAN STR +2.0
+*             WHICH HAS ALREADY PARTIALLY BE SCANNED BY A PRECEDING+2.0
+*             CALL (WITH RC=4,12,16).  HERE BTXCSCAN WILL NOT      +2.0
+*             INITIALISE ALL OUTPUT TO NULL, BUT DETERMINE THE LAST+2.0
+*             OUTPUT LIST ENTRY (IN THE POSITIONAL LIST) SET BY THE+2.0
+*             PRECEDING CALL AND CONTINUE THERE.                   +2.0
+*        256-BYTE WORKAREA: MUST BE PROVIDED BY CALLER (NO INFORMA-+2.0
+*             TION IS SAVED THERE FOR CONTINUATION CALL).          +2.0
+*        PTRTYPE:  0 IF THE INPUT STRING POINTER IS A SHORT STRING +2.0
+*             POINTER ("LSV" MACRO: FL1'LEN',AL3(ADDR) );          +2.0
+*             1 IF IT IS A LONG STRING POINTER ("LSW" MACRO:       +2.0
+*             A(ADDR),H'?',H'LEN' ).                               +2.0
+*        INPUT STRING POINTER:  DESCRIBES THE STRING TO BE SCANNED  2.0
+*             DEPENDENT ON PTRTYPE.                                 2.0
+*        GAP:  NUMBER OF LEADING GAPS ALLOWED, PROVIDES FOR SPECIAL 2.0
+*             FORM OF POSITIONAL PARAMETER DELIMITING AS FOLLOWS:     *
+*             IF GAP>0 IS SPECIFIED, THE CORRESPONDING NUMBER OF      *
+*             LEADING POSITIONAL PARAMETERS ARE NOT TERMINATED BY     *
+*             COMMAS, BUT EACH BY ONE OR MORE (IDENTICAL) BLANKS      *
+*             (I.E. CHAR OF THE END-OF-STRIN CLASS).  THIS IS ESPE-   *
+*             CIALLY USEFUL TO SCAN FULL STATEMENTS OF THE LABEL/     *
+*             OPCODE/OPERAND-LIST FORMAT:                             *
+*             TO SCAN                                                 *
+*             "LABEL   OPCODE  OPERAND1,OPERAND2,KEY1=A,KEY2=B"       *
+*             SPECIFY                                                 *
+*             #POS=4,#KEY=(WHAT-YOU-HAVE),#GAP=2                      *
+*             THEN THE OPCODE IS RETURNED AS 2ND POSITIONAL PARM.     *
+*        POSITIONAL PAR OUTPUT LIST:  THIS LIST RECEIVES THE (SHORT)  *
+*             STRING POINTERS TO THE POSITIONAL PARAMETER VALUES;     *
+*             IT IS N+1 FULLWORDS WHEN N POSITIONAL PARAMETERS ARE    *
+*             EXPECTED:                                               *
+*             FL1'N',AL3(0),(N)F'?'  --  SEE 'OUTPUT'.              2.0
+*        IGN: IF IGN=1, UNDEFINED KEYWORDS AND THEIR ACTUAL VALUES  3.0
+*             ARE IGNORED (BYPASSED, BUT SYNTAX-CHECKED), I.E. NO   3.0
+*             RC=16 GENERATED FOR THIS CASE.                        3.0
+*             ALSO SEE INDEX=0 FOR A KEYWORD DEFINITION BELOW.      3.0
+*        KEYWORD PAR OUTPUT LIST:  THIS LIST RECEIVES THE (SHORT)     *
+*             STRING POINTERS TO THE KEYWORD VALUES, IT ALSO DEFINES  *
+*             THE KEYWORDS; IT IS &N+1 FULLWORDS WHEN &N DIFFERENT    *
+*             KEYWORDS ARE DEFINED:                                   *
+*             FL1'&N',AL3(KEYWORD-DEFINITION),&N.F'?'               2.0
+*                                                                     *
+*         --  THE KEYWORD DEFINITION IS A LIST (SYMBOL TABLE) OF &K 3.0
+*             ENTRIES GENERATED BY MACRO BTXCSYM MF=L (OLD LISTS    3.0
+*             IN THE BTXCODE FORMAT ARE ALSO STILL ACCEPTED)        3.0
+*             KEYDEF DC AL1(&K,0,0,&VALLEN)                         3.0
+*                    DC AL1(LEN),CL(LEN)'KEYWORD',AL&VALLEN(VALUE)  3.0
+*                       THIS &K TIMES                               3.0
+*             THE FIRST BYTE OF VALUE DEFINES THE INDEX TO THE      3.0
+*             KEYWORD OUTPUT LIST ASSOCIATED WITH THIS KEYWORD, 1-&N3.0
+*             FOR FIRST TO &N-TH POSITION. INDEX 0 MEANS THAT THE   3.0
+*             KEYWORD AND ITS ACTUAL ARGUMENT ARE IGNORED (BUT      3.0
+*             SYNTAX-CHECKED).                                      3.0
+*             A SECOND VALUE BYTE, IF PRESENT, DEFINES POSSIBLE     3.0
+*             OPTIONS.  FURTHER VALUE BYTES ARE IGNORED.            3.0
+*             IF &VALLEN=0, THE ASSUMED VALUE IS THE POSITION IN THE3.0
+*             SYMBOL TABLE (SEQUENCE 1-1 TO OUTPUT LIST).           3.0
+*          -- EXAMPLES:                                             3.0
+*          -- KEYDEF BTXCSYM (FILE,1),(SPACE,2),(VOLUME,3),(VOL,3),-3.0
+*                            (TYPE,4),VALLEN=1,MF=L                 3.0
+*             DEFINES 4 KEYWORDS AND THE SYNOYM 'VOL' FOR 'VOLUME'  3.0
+*          -- KEYDEF2 BTXCSYM FILE,SPACE,VOLUME,TYPE                3.0
+*                     IS EQUIVALENT TO                              3.0
+*          -- KEYDEF3 BTXCSYM (FILE,1),(SPACE,2),(VOLUME,3),(TYPE,4)3.0
+*          -- FORMER FORMAT GENERATED BY MACRO 'BTXCODE':           3.0
+*             NO HEADER, N TIMES (N OF OUTPUT LIST)                 3.0
+*             AL1(LEN),CL(LEN)'KEYWORD'                               *
+*          -- KEYDEF4 BTXCODE (FILE,SPACE,VOLUME,TYPE),MF=L         3.0
+*             IS FUNCTIONALLY EQUIVALENT TO 'KEYDEF3' ABOVE.        3.0
+*                                                                   3.0
+*          -- KEYWORD OPTIONS (VALUE BYTE 2 IN DEFINING TABLE):     3.0
+*             SOMETIMES IT IS USEFUL TO ALLOW NO-VALUE KEYWORDS,    3.0
+*             I.E. PARAMETERS THAT SYNTACTICALLY LOOK LIKE POSITION-3.0
+*             AL PARAMETERS, BUT FUNCTION AS KEYWORDS WITH BINARY   3.0
+*             VALUE (TO WIT, PRESENT OR NOT PRESENT).  OPTION BYTE  3.0
+*             OF A KEYWORD SYMBOL MAY BE SET AS:                    3.0
+*             X'80' -- NO-VALUE KEYWORD ONLY ('KEYWORD=...' ILLEGAL)3.0
+*             X'40' -- NO-VALUE OR NORMAL USE (BOTH 'KEYWORD' AND   3.0
+*                      'KEYWORD=...' LEGAL)                         3.0
+*             NOTE THAT NO-VALUE KEYWORDS MAY BE NOT RECOGNIZED IF  3.0
+*             POSITIONAL PARAMETERS ARE ALSO ALLOWED.               3.0
+*                                                                     *
+*        DELIMITER SET:  IF THE STANDARD DELIMITER SET (BLANK, COMMA, *
+*             EQSIGN, QUOTE, LPAR, RPAR) SEEMS NOT SUITABLE AND/OR    *
+*             IF THE SYNTACTIC EFFECT ASSOCIATED WITH CERTAIN DELIMI- *
+*             TERS IS NOT DESIRED (E.G. NO QUOTED STRINGS), AN OWN    *
+*             DELIMITER SET CAN BE SPECIFIED.  THIS DELIMITER         *
+*             DEFINITION LIST HAS 6 ENTRIES OF THE FOLLWOING FORMAT:  *
+*                   AL1(&NI),CL&NI'&DELI'                             *
+*             WHERE &NI IS THE NUMBER OF EQUIVALENT DELIMITERS OF THE *
+*             I-TH CLASS, AND &DELI IS A CHAR.STRING OF LENGTH &NI,   *
+*             DEFINING THE DELIMITERS OF CLASS I.                     *
+*             IF TWO OR MORE DELIMITER CHARACTERS ARE SPECIFIED FOR   *
+*             A CLASS, THEY ARE REGARDED AS COMPLETELY EQUIVALENT.    *
+*             THE DELIMITER CLASS I IS FUNCTIONALLY DELETED IF N(I)=0.*
+*                                                                     *
+*             MEANINGS OF THE DELIMITER CLASSES:                      *
+*             1  TERMINAL DELIMITER -- EQUIVALENT TO END-OF-STRING    *
+*             2  PARAMETER DELIMITER                                  *
+*             3  KEYWORD DEFINING DELIMITER                           *
+*             4  QUOTED STRING DELIMITER                              *
+*             5  LEFT PARENTHESIS                                     *
+*             6  RIGHT PARENTHESIS                                    *
+*             THE STANDARD DELIMITER DEFINITION LIST IS:              *
+*             DC   AL1(1),C' '                                        *
+*             DC   AL1(1),C','                                        *
+*             DC   AL1(1),C'='                                        *
+*             DC   AL1(1),C''''                                       *
+*             DC   AL1(1),C'('                                        *
+*             DC   AL1(1),C')'                                        *
+*                                                                     *
+*OUTPUT: THE N+1-TH WORD    OF THE POSITIONAL PARAMETER OUTPUT LIST   *
+*        POINTS TO THE N-TH POSITIONAL PARAMETER; THE N+1-TH WORD OF  *
+*        THE KEYWORD PARAMETER OUTPUT LIST POINTS TO THE VALUE OF THE *
+*        KEYWORD WHICH IS THE N-TH IN THE KEYWORD DEFINITION LIST.    *
+*            EACH ENTRY IS SET AS FOLLOWS:                            *
+*                                                                     *
+*        +-----------+-----------------------------------+            *
+*        | LENGTH .. |   ADDRESS OF PARAMETER VALUE      |            *
+*        +-----------+-----------------------------------+            *
+*                                                                     *
+*           AN OUTPUT LIST ENTRY OF ALL-ZERO INDICATES THAT THE       *
+*        CORRESPONDING PARAMETER HAS NOT OCCURED YET,                 *
+*           AN OUTPUT LIST ENTRY OF ZERO LENGTH ONLY INDICATES THAT   *
+*        THE CORRESPONDING PARAMETER HAS A NULL VALUE (POS: OMITTED;  *
+*        KEYW: EXPLICITELY WRITTEN NULL VALUE - SYSOUT=, ).           *
+*        A NO-VALUE KEYWORD ALWAYS SHOWS A LENGTH OF ZERO, TO DECIDE  *
+*        WHETHER IT HAS OCCURED OR NOT, ONE MUST INSPECT THE ADDRESS  *
+*        FIELD.  IF ',LIST,' AND ',LIST=,' ARE BOTH LEGAL, IT IS      *
+*        NOT POSSIBLE TO DETERMINE WHICH HAS OCCURED, ONLY FROM       *
+*        THE OUTPUT LIST ENTRY.                                       *
+*           THE SAME KEYWORD MAY OCCUR SEVERAL TIMES IN THE INPUT     *
+*        STRING, NO ERROR IS RECORDED, BUT THE LAST VALUE ENCOUNTERED *
+*        WILL BE OUTPUT.                                              *
+*                                                                     *
+*        IN THE INPUT STRING POINTER, THE ORIGINAL INPUT LENGTH IS RE-*
+*        PLACED BY THE LENGTH OF THE SCANNED STRING - THIS MAY BE USED*
+*        TO LOCATE THE POINT OF ERROR. WITH RC=12, E.G., THIS VALUE CAN
+*        BE USED TO DETERMINE WHERE TO CONTINUE AFTER HAVING PROVIDED *
+*        FOR MORE POSITIONAL PARAMETERS.                              *
+*                                                                     *
+*RETURN CODES:                                                        *
+*         0    NO ERROR, END OF PARAMETERS HAS BEEN RECOGNIZED (BLANK)*
+*         4    NO ERROR, CONTINUATION OF PARAMETERS IS INDICATED      *
+*              (COMMA-BLANK)                                          *
+*         8    SYNTAX ERROR                                           *
+*        12    TOO MANY POSITIONAL PARAMETERS (OUTPUT LIST SHORT)     *
+*        16    UNDEFINED KEYWORD (NO IGNORE OPTION)                 3.0
+*              OR INVALID INDEX IN KEYWORD DEFINITION TABLE         3.0
+*                                                                     *
+*EXTERNAL ROUTINES:                                                   *
+*        NONE.                                                        *
+*                                                                     *
+*ATTRIBUTES:    RE-ENTRANT, READ-ONLY, NO I/O.                        *
+*                                                                     *
+*RELATED PGMS:  BTXCSYM, BTXQUOTE, BTXQUOTS, BTXSPCHR               3.0
+*                                                                     *
+*STORAGE:PROGRAM < 1K;                                                *
+*        WORK AREA PROVIDED BY CALLER 256 BYTES;                    2.0
+*        NO LOCAL DYNAMIC STORAGE OBTAINED.                         2.0
+*                                                                     *
+*LOAD MODULE CREATION:                                                *
+*        COMPILE WITH - $SYS.MACLIB                                   *
+*        LINK-EDIT WITH - NONE                                        *
+*        LOAD MODULE ATTRIBUTES - RENT,NCAL                           *
+*                                                                     *
+*CHANGE LEVEL:   1.2 -- 29JUN73  SCHOENEN                          SN01
+*                1.3 -- 30JAN75  SCHOENEN                          SN02
+*                2.0 -- 15MAY75  PAHL                               2.0
+*        MAJOR MODIFICATION OF PARAMETER LIST, ESPECIALLY INTRODUC- 2.0
+*        TION OF THE WORKAREA PARAMETER (THUS NO LOCAL DYNAMIC      2.0
+*        STORAGE REQUEST REQUIRED ANYMORE).  SHIFTING OF PARAMETER  2.0
+*        FLAGS ETC.  MINOR INTERNAL CHANGES.                        2.0
+*        DUE TO INCOMPATIBLE CHANGE OF PARAMETER LIST MODULE HAD TO 2.0
+*        BE RENAMED FROM "BTXPSCAN" TO "BTXCSCAN".                  2.0
+*                2.1 -- 22DEC75  PAHL                               2.1
+*        HANDLE OUTPUT LISTS DECLARED WITH 0 ENTRIES AS IF LIST     2.1
+*        WERE OMITTED.                                              2.1
+*                3.0 -- 13JUN77  PAHL                               3.0
+*        CORRECTIONS.  NEW KEYWORD DEFINITION TABLE: BTXCSYM FORMAT 3.0
+*                                                                     *
+*AUTHOR:       TH. PAHL               18SEP69                         *
+*              MOD. BY H.SCHOENEN     29JUN73                      SN01
+*                                                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         EJECT
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        MACRO    DEFINITIONS                                         *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         MACRO
+&LABEL   LSV   &REGA,&REGL,&ADDR
+.*
+         AIF   ('&REGA' EQ '' OR '&REGL' EQ '' OR '&ADDR' EQ '').Y1
+         AIF   ('&REGA' EQ '&REGL').Y2
+         AIF   ('&REGL' EQ '0' OR '&REGL' EQ 'R0').R0
+&LABEL   L     &REGL,&ADDR
+         LA    &REGA,0(,&REGL)         STRING ADDR (PURE)
+         SRL   &REGL,24                STRING LENGTH
+         MEXIT
+.R0      ANOP
+&LABEL   L     &REGA,&ADDR
+         LR    &REGL,&REGA
+         LA    &REGA,0(,&REGA)         STRING ADDR (PURE)
+         SRL   &REGL,24                STRING LENGTH
+         MEXIT
+.Y1      BMCERMAC LSP,001,,,,&LABEL
+         MEXIT
+.Y2      BMCERMAC LSP,067,FIRST,SECOND,,&LABEL
+         MEND
+         SPACE 2
+         MACRO
+&LABEL   LSW   &RA,&RL,&ADDR
+&LABEL   L     &RA,&ADDR
+         LH    &RL,6+&ADDR
+         MEND
+         SPACE 2
+         MACRO
+&LABEL   STSV  &REGA,&REGL,&ADDR
+.*
+         AIF   ('&REGA' EQ '' OR '&REGL' EQ '' OR '&ADDR' EQ '').Y1
+         AIF   ('&REGA' EQ '&REGL').Y2
+&LABEL   ST    &REGA,&ADDR             STRING ADDR
+         STC   &REGL,&ADDR             STRING LENGTH
+         MEXIT
+.Y1      BMCERMAC STSP,001,,,,&LABEL
+         MEXIT
+.Y2      BMCERMAC STSP,067,FIRST,SECOND,,&LABEL
+         MEND
+         EJECT
+         PRINT NOGEN
+BTXCSCAN CSECT
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        REGISTER DEFINITIONS                                         *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+R13      EQU   13                  -> CALLER'S SAVE AREA
+R14      EQU   14                  LINKAGE                          2.0
+R15      EQU   15
+R0       EQU   0                   ZERO - (R0)=0
+R1       EQU   1                   SCAN POINTER (TRT)
+R2       EQU   2                   LENGTHS AND SCAN TR CODE
+*
+RLIST    EQU   3                   CURRENT OUTPUT LIST
+RLX      EQU   4                   INDEX TO NEXT AVAILABLE ENTRY
+RLC      EQU   5                   NUMBER OF AVAILABLE ENTRIES LEFT
+*
+RINPUT   EQU   6                   SAVE BEGINNING OF INPUT STRING
+RLAST    EQU   7                   A(LAST CHAR OF INPUT STRING)
+RA       EQU   8                   SAVE BEGINNING OF A PARAMETER
+RB       EQU   9                   SCAN POINTER (LAST SUBFIELD)
+*
+RBASE    EQU   10                      BASE REGISTER FOR PROGRAM
+*
+RPARM    EQU   11                  -> PARAMETER LIST
+RWORK    EQU   12                  -> WORK AREA                    +2.0
+         EJECT ,
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   PARAMETER LIST                                                    *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+PARMLST  DSECT
+PARMCONT DS    0X                  CONTINUATION CALL INDICATOR     +2.0
+PARMWORK DS    A                   -> CALLER PROVIDED WORK AREA    +2.0
+PARMINTY DS    0X                  INPUT STRING POINTER TYPE       +2.0
+PARMIN   DS    A                   A(INPUT STRING POINTER)
+PARMGAPN DS    0X                  (X'80'+) NUMBER OF LEADING GAPS  2.0
+PARMPOS  DS    A                   A(POS PAR OUTPUT LIST)
+PARMKEY  DS    A                   A(KEYW PAR OUTPUT LIST)          2.0
+PARMDEL  DS    A                   A(DELIMITER DEFINITION)
+         SPACE 4
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   SAVE AREA OF CALLER  (BASED BY (R13))                             *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+CSA      DSECT ,                   CALLER'S SAVE AREA
+         DS    3A                  LENGTH, CHAINGING
+         DS    F                   CALLER'S (R14)
+TRCODE   DS    0X                  LAST TRT CODE                    2.0
+         DS    F                   CALLER'S (R15)
+         DS    F                   CALLER'S (R0)
+         DS    12F                 CALLER'S (R1)-(R12)
+CSA#     EQU   *-CSA
+         SPACE 4
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   WORK AREA: SCAN TABLE                                             *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+WORKAREA DSECT
+TRTAB    DS    XL256
+WORKARE# EQU   *-WORKAREA
+         SPACE 1
+*   TRANSLATE CODES
+T#BLANK  EQU   4
+T#COMMA  EQU   8
+T#EQSIGN EQU   12
+T#APOSTR EQU   16
+T#LPAR   EQU   20
+T#RPAR   EQU   24
+         EJECT
+         PRINT NOGEN
+BTXCSCAN CSECT ,
+         USING BTXCSCAN,R15
+         SAVE  (14,12),,BTXCSCAN-3.0                                3.0
+*   PROGRAM ADDRESSABILITY                                          2.0
+         LR    RBASE,R15                                            2.0
+         DROP  R15                                                  2.0
+         USING BTXCSCAN,RBASE                                       2.0
+*   PARAMETER LIST
+         LR    RPARM,R1
+         USING PARMLST,RPARM
+*   WORK AREA (TRTAB)
+         L     RWORK,PARMWORK                                      +2.0
+         USING WORKAREA,RWORK                                      +2.0
+*   CALLER'S SAVE AREA                                             +2.0
+         USING CSA,R13                                             +2.0
+         SPACE 1
+*
+*       LOAD - INITIALIZE PROGRAM
+*
+*   PARAMETER
+         L     R14,PARMIN          -> INPUT STRING POINTER
+         CLI   PARMINTY,0              SHORT OR LONG INPUT POINTER?+2.0
+         BNE   GETINW                  B.IF LONG                   +2.0
+           LSV   RINPUT,RLAST,0(R14)   ADDR,LEN OF INPUT STRING     2.0
+         B     GOTIN                                               +2.0
+GETINW     LSW   RINPUT,RLAST,0(R14)   ADDR,LEN OF INPUT STRING    +2.0
+GOTIN    EQU   *                                                   +2.0
+         LR    R1,RINPUT           A(INPUT STRING)
+         BCTR  R1,0                    (- SEE SCAN -)
+         ALR   RLAST,R1            A(LAST CHAR OF STRING)
+*
+*   BUILD TRANSLATE TABLE
+         XC    TRTAB,TRTAB         SET TO ZERO
+         L     RLIST,PARMPOS
+         O     RLIST,PARMKEY
+         IF    RLIST,LT,0,GOTO,LOAD3 B.IF NO 5TH PARAMETER (EOL)
+         L     RLIST,PARMDEL
+         LA    RLIST,0(,RLIST)
+         IF    RLIST,NE,0,GOTO,LOAD4 B.IF NONZERO: DELIMTERS GIVEN
+LOAD3    LA    RLIST,DELIMIT       STANDARD DELIMITER SET
+LOAD4    LA    R0,6                NUMBER OF DELIMITER CLASSES
+         SR    R2,R2
+         SR    R15,R15
+         LR    RLX,R2
+LOAD5    LA    RLX,4(,RLX)         NEXT TRANSLATE CODE
+         IC    R15,0(,RLIST)       NUMBER OF DELIMITERS IN CLASS
+         LTR   RLC,R15
+         BZ    LOAD7               CLASS OMITTED
+LOAD6    IC    R2,0(RLC,RLIST)     INSERT DELIMITER AND USE IT AS INDEX
+         STC   RLX,TRTAB(R2)       TO TABLE, TO STORE TR CODE
+         BCT   RLC,LOAD6
+LOAD7    LA    RLIST,1(R15,RLIST)  NEXT ENTRY IN DEFINITION LIST
+         BCT   R0,LOAD5
+*   SET REGISTERS
+*              R0 = ZERO  NOW CONTAINS ZERO
+*              R2 NOW IS USEABLE FOR BYTE INSERTION
+*
+         SPACE 1
+*
+*   UNLESS CONTINUATION CALL, INITIALIZE OUTPUT PTRS TO 0.
+*
+         CLI   PARMCONT,0
+         BNE   GO                      CONTINUATION CALL.
+         L     RLIST,PARMPOS
+         BAL   R14,CLEAR           CLEAR POS. OUTPUT  LIST
+         TM    PARMPOS,X'80'                                        2.0
+         BO    GO                  NO KEYWORDS                      2.0
+         L     RLIST,PARMKEY
+         BAL   R14,CLEAR           CLEAR KEYWORD OUTPUT  LIST
+         SPACE 1
+GO       L     RLIST,PARMPOS
+         BAL   R14,TESTLIST        CHECK LIST SPECIFIED             2.1
+         BZ    GOKEY               NO POS. PAR. EXPECTED
+*
+*   FIND FIRST UNUSED ENTRY IN POS. PAR. OUTPUT  LIST.
+*   FOR INITIAL CALL THIS WILL BE THE FIRST; FOR CONTINUATION CALL
+*   THIS WILL DETERMINE, WITH WHICH POS.PAR. TO CONTINUE.
+*
+         SR    RLC,RLC                                              2.0
+         IC    RLC,0(,RLIST)       NUMBER OF AVAILABLE ENTRIES      2.0
+         LA    RLX,4               ENTRY INDEX                      3.0
+GOSEEK   CL    R0,0(RLX,RLIST)     FIND FIRST ALL-ZERO ENTRY        3.0
+         BZ    SCAN                FOUND - START WORKING            2.0
+         LA    RLX,4(,RLX)
+         BCT   RLC,GOSEEK
+*  NO (MORE) POS.PAR. EXPECTED.
+GOKEY    TM    PARMPOS,X'80'       KEYWORDS EXPECTED?               2.0
+         BO    RETURN12            NO - TOO MANY POS.PAR.           2.0
+         L     RLIST,PARMKEY       LOAD KEYWORD OUTPUT LIST
+         BAL   R14,TESTLIST        CHECK LIST SPECIFIED             2.1
+         BNP   RETURN12
+         NI    PARMGAPN,X'80'      NO SEPARATING GAPS MORE ALLOWED SN01
+         O     RLIST,=A(X'80000000')   INDICATE 'KEYWORD LIST'      2.0
+         LH    RLX,=H'-1'          INDICATE 'SCAN FOR KEYWORD'
+         SPACE 4
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+*   SCANNING LOOP                                                     *
+*                                                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+SCAN     LA    R14,SCAN1           RESET ROUTING MODIFIER           2.0
+         LA    RA,1(,R1)           SAVE BEGINNING OF PARAMETER
+         SR    R15,R15                 ZERO PARENTHESES COUNT
+SCAN0    LA    RB,1(,R1)           POSITION BEHIND LAST DELIMITER
+         LA    R1,1(,RLAST)        FIRST CHAR BEHIND INPUT STRING
+         LR    R2,RLAST
+         SR    R2,RB               RESIDUAL LENGTH -1
+         BM    BLANKT              END OF STRING                   SN01
+         EX    R2,TRT              SCAN INPUT FOR DELIMITERS
+         BZ    BLANKT                                              SN01
+         STC   R2,TRCODE           SAVE TR CODE.
+         BALR  R14,R14             (MODIFIER)
+SCAN1    B     *(R2)               EVALUATE DELIMITER
+         B     BLANK
+         B     COMMA               ,
+         B     EQSIGN              =
+         B     APOSTR              '
+         B     LPAR                (
+         B     RETURN8             ) - SYNTAX ERROR: SINGLE RPAR
+TRT      TRT   0(,RB),TRTAB
+         SPACE 1
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   BLANK: END OF STRING                                              *
+*          OR                                                         *
+*          GAP BETWEEN LEADING POSITIONAL OPERANDS (SPECIAL FEATURE   *
+*          TO ALLOW SCANNING OF FULL JCL OR ASM STATEMENT, E.G.       *
+*          LABEL OPCODE OPERAND1,OPERAND2,KEY1=A,KEY2=B               *
+*          HERE GAPN=2, OPCODE IS 2ND POS.OPERAND FOR SCAN).          *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   END OF STRING                                                   2.0
+BLANKT   NI    PARMGAPN,X'80'          END OF SPECIAL GAPS.         2.0
+         SR    R2,R2                   RESTORE VIRGINITY.           2.0
+         LA    R14,0(,R14)             IF MODIFIER INDICATES A
+         CL    R14,=A(SCAN1)           SUBFIELD SCAN -
+         BNE   RETURN8                 - SYNTAX ERROR.
+         MVI   TRCODE,T#BLANK      (HAS NOT BEEN STORED YET)        2.0
+*   ACTUAL BLANK ENCOUNTERED IN STRING                              2.0
+BLANK    CLR   R1,RA                                                2.0
+         BNH   BLANK2              NULL VALUE, INVESTIGATE FURTHER
+         LTR   RLX,RLX             SCANNING FOR KEYWORD?
+         BM    EQSIGN2             YES - COULD BE NO-VALUE KEYWORD.
+BLANK1   BAL   R14,PUTVAL          PUT VALUE OUT                    2.0
+         TM    PARMGAPN,X'7F'      LEADING POSITIONALS SEPARATED BY
+         BZ    RETURN0             BLANKS?  B.IF NOT: END OF SCAN.
+*   BLANK STRING SEPARATING LEADING POSITIONALS
+         IC    R2,PARMGAPN         NO OF SEPARATING GAPS           SN01
+         BCTR  R2,0                DECREMENT REMAINING NO. OF SEP. SN01
+         STC   R2,PARMGAPN         GAPS AND SAVE IT                SN01
+BLANKR   CLR   R1,RLAST            END OF INPUT                    SN02
+         BNL   RETURN0                BR IF YES                    SN02
+         CLC   1(1,R1),0(R1)       SKIP                            SN01
+         BNE   COMMA1                 SEPARATING                   SN01
+         LA    R1,1(,R1)                 BLANKS.                   SN01
+         B     BLANKR              LOOP                            SN02
+*
+BLANK2   CLR   RA,RINPUT           FIRST BYTE IS BLANK ?
+         BNH   BLANK3              YES, MAY BE END OF INPUT OR GAP SN01
+         BCTR  R1,0
+         TRT   0(1,R1),TRTAB       INSPECT LAST DELIMITER:
+         LA    R1,1(,R1)
+         CH    R2,=Y(T#COMMA)
+         BE    RETURN4             COMMA: CONTINUATION INDICATED   SN01
+         B     BLANK1              INSERT VALUE                    SN01
+*
+BLANK3   TM    PARMGAPN,X'7F'      SEPARATING GAPS ALLOWED ?       SN01
+         BZ    RETURN0             NO - EASY JOB                   SN01
+         B     BLANK1              FIRST PARAMETER OMITTED         SN01
+         SPACE 1
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   COMMA:  OPERAND DELIMITER.                                        *
+*           TERMINATES POSITIONAL OPERAND AND VALUE OF KEYWORD.       *
+*           MAY ALSO TERMINATE KEYWORD (FOR NO-VALUE KEYWORD).        *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+COMMA    TM    PARMGAPN,X'7F'      STILL GAPS ALLOWED ?            SN01
+         BNZ   RETURN8             YES, THEN COMMA IS WRONG        SN01
+         LTR   RLX,RLX             SCANNING FOR KEYWORD?
+         BM    EQSIGN2             YES - COULD BE NO-VALUE KEYWORD.
+         BAL   R14,PUTVAL          PUT VALUE OUT                    2.0
+         LTR   RLIST,RLIST         SCANNING FOR POS.PAR.?
+         BM    COMMA2              NO - FOR KEYWORD PAR.
+COMMA1   LA    RLX,4(,RLX)         YES - NEXT ENTRY IN POS. OUTPUT LIST
+         BCT   RLC,SCAN            SCAN FOR NEXT PAR.
+         B     GOKEY               END - SWITCH TO KEYWORDS.
+COMMA2   LH    RLX,=H'-1'          INDICATE KEYWORD SCAN
+         B     SCAN
+         SPACE 1
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   EQSIGN:  KEYWORD TERMINATOR.  KEYWORD VALUE IS TO FOLLOW          *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+EQSIGN   LTR   RLIST,RLIST         STILL SCANNING FOR POS.PAR.?
+         BM    EQSIGN1             NO - KEYWORD SCAN
+*   SCAN FOR POS.PAR ENCOUNTERED KEYWORD DELIMITER
+         TM    PARMPOS,X'80'       KEYWORDS EXPECTED?
+         BO    RETURN8             NO - SYNTAX ERROR
+*   SWITCH TO KEYWORD SCAN (POSITIONALS NOW DONE)
+         L     RLIST,PARMKEY       LOAD KEYWORD OUTPUT LIST
+         BAL   R14,TESTLIST        CHECK LIST SPECIFIED             2.1
+         BZ    RETURN8
+         O     RLIST,=A(X'80000000')  INDICATE 'KEYWORD LIST'
+         NI    PARMGAPN,X'80'      NO SEPARATING GAPS ALLOWED NOW.
+         B     EQSIGN2
+*   SCAN FOR KEY.PAR ENCOUNTERED KEYWORD DELIMITER
+EQSIGN1  LTR   RLX,RLX             KEYWORD ALREADY FOUND?
+         BNM   SCAN0               YES - '=' IN VALUE KEYWORD
+*
+*** SEARCH KEYWORD IN KEYWORD DEFINITION SYMBOL TABLE
+*
+EQSIGN2  LSV   RLX,RLC,0(RLIST)    -> KEYWORDS, # KEYWORD OUTPUT    3.0
+         SR    R0,R0               PRESET SYMBOL VALLEN=0           3.0
+         CLI   1(RLX),0            CHECK BTXCODE OR BTXCSYM         3.0
+         BNE   EQSIGN2C            B.IF BTXCODE                     3.0
+         IC    RLC,0(,RLX)         NUMBER OF DEFINED NAMES IN TABLE 3.0
+         IC    R0,3(,RLX)          SYMBOL VALLEN                    3.0
+         LA    RLX,4(,RLX)         -> START OF SYMBOL LIST          3.0
+EQSIGN2C LR    RB,R1                                                3.0
+         SLR   RB,RA               LENGTH OF INPUT SYMBOL           3.0
+         SR    R15,R15             COUNTER FOR DEFAULT VALUE        3.0
+EQSIGN3  LA    R15,1(,R15)         INCREMENT DEFAULT INDEX          3.0
+         IC    R2,0(,RLX)          LENGTH OF SYMBOL IN TABLE        3.0
+         N     R2,=A(X'3F')
+         CLR   R2,RB                                                3.0
+         BNE   EQSIGN3C            SKIP IF DIFFERENT TO INPUT       3.0
+         BCTR  R2,0
+         EX    R2,KEYCLC           SEARCH KEYWORD IN DEFINITION LIST
+         LA    R2,1(,R2)                                            3.0
+         BE    EQSIGN4             FOUND
+EQSIGN3C LA    RLX,1(R2,RLX)       SKIP OVER SYMBOL                 3.0
+         ALR   RLX,R0              AND VALUE TO NEXT ENTRY.         3.0
+         BCT   RLC,EQSIGN3
+*** UNDEFINED KEYWORD
+         TM    PARMKEY,X'01'       IGNORE UNDEFINED KEYWORDS?       3.0
+         BNO   RETURN16            NO, EXIT: UNDEFINED KEYWORD      3.0
+         SR    RLX,RLX             YES: INDEX TO IGNORE OPERAND.    3.0
+         B     SCAN                GO GULP VALUE.                   3.0
+*** READY TO SCAN KEYWORD VALUE
+EQSIGN4  IF    R0,EQ,0,GOTO,EQSIGN4C SKIP IF NULL VALLEN            3.0
+         IC    R15,1(R2,RLX)       FETCH FIRST VALUE BYTE           3.0
+         EX    R15,KEYCLI          CHECK FOR LIMITS                 3.0
+         BL    RETURN16            B.IF INVALID: RC=UNDEF.KEYWORD   3.0
+         LA    RLX,2(R2,RLX)       -> OPTION BYTE IF PRESENT        3.0
+         IF    R0,GT,1,GOTO,EQSIGN4C B.IF SO                        3.0
+         LA    RLX,=X'00'          NO OPTION BYTE                   3.0
+EQSIGN4C LR    RB,RLX              SAVE PTR OPTION BYTE             3.0
+         LR    RLX,R15             GET OUTPUT LIST INDEX            3.0
+         SLL   RLX,2
+         CLI   TRCODE,T#COMMA      COMING FROM BLANK OR COMMA?
+         BNH   EQSIGN5             YES - NO-VALUE KEYWORD.
+         CLI   0(RB),X'80'         NO-VALUE USE PERMITTED ONLY?
+         BL    SCAN                NO - NORMAL KEYWORD, GET VALUE.
+         B     RETURN8             YES, SYNTAX ERROR.
+EQSIGN5  CLI   0(RB),X'40'         NO-VALUE USE PERMITTED?
+         BL    RETURN8             NO - SYNTAX ERROR.
+         IC    R2,TRCODE           YES, FINISH EVALUATION OF IT.
+         LR    RA,R1               (NULL VALUE)
+         B     SCAN1
+KEYCLC   CLC   1(,RLX),0(RA)
+KEYCLI   CLI   0(RLIST),*-*                                         3.0
+         SPACE 1
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   APOSTROPHE:  STRING ENCLOSED IN A PAIR OF THESE MUST NOT BE       *
+*                SCANNED FOR ANY DELIMITER.                           *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+APOSTR   BAL   R14,SCAN0           SCAN FOR ENDING APOSTROPHE
+         CLI   TRCODE,T#APOSTR     FOUND?
+         BNE   APOSTR
+         B     SCAN0               YES - CONTINUE NORMAL SCAN
+         SPACE 1
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   LEFT PARENTHESIS:  SCAN FOR BALANCING RIGHT ONE, ANY COMMA OR     *
+*                      EQSIGN NOT BEING HONOURED MEANWHILE.           *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+LPAR     LA    R15,1(,R15)         INCREMENT PARENTHESES COUNT
+LPAR0    BAL   R14,SCAN0
+         B     *(R2)
+         B     RETURN8             SYNTAX ERROR: BLANK WITHIN PARENTH
+         B     LPAR0               ,
+         B     LPAR0               =
+         B     LPAR2               '
+         B     LPAR                (
+*                                  )
+         BCT   R15,LPAR0           DECREMENT PARENTHESES COUNT
+         B     SCAN0               CONTINUE NORMAL SCAN
+*   QUOTED STRING WITHIN PARENTHESES: HAS PRECEDENCE
+LPAR2    BAL   R14,SCAN0           SCAN FOR ENDING APOSTROPHE
+         CLI   TRCODE,T#APOSTR     FOUND?
+         BNE   LPAR2
+         B     LPAR0               YES - CONTINUE PARENTHESES SCAN
+         EJECT ,
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+*   CLEAR - SET AN OUTPUT LIST TO ZERO                                *
+*                                                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+CLEAR    DS    0H
+         SR    R0,R0               GET A ZERO
+         LA    RLIST,0(,RLIST)     LIST ADDR PURE
+         LTR   RLIST,RLIST         OUTPUT LIST GIVEN?
+         BZR   R14                 NO - NOTHING TO DO
+         SR    R2,R2
+         IC    R2,0(,RLIST)        NUMBER OF ENTRIES IN LIST
+         LTR   R2,R2                                                2.1
+         BZR   R14                 NULL ENTRIES: SAME AS OMITTED    2.1
+         LA    RLIST,4(,RLIST)     NEXT ENTRY
+         ST    R0,0(,RLIST)        STORE ZERO
+         BCT   R2,*-8
+         BR    R14
+         SPACE 2
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+*   TESTLIST -- CHECK OUTPUT LIST SPECIFIED AND MORE THAN NULL ENTRIES*
+*                                                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+TESTLIST DS    0H                                                   2.1
+         LA    RLIST,0(,RLIST)     ADDR PURE                        2.1
+         LTR   RLIST,RLIST         TEST LIST ADDR OMITTED           2.1
+         BZR   R14                 B.IF                             2.1
+         CLI   0(RLIST),0          TEST FOR NULL ENTRIES            2.1
+         BR    R14                                                  2.1
+         SPACE 2
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+*   PUTVAL -- STORE PARAMETER VALUE INTO OUTPUT ENTRY                 *
+*                                                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+PUTVAL   DS    0H                                                   2.0
+         LTR   RLX,RLX             OUTPUT LIST INDEX                3.0
+         BNPR  R14                 B.IF OPERAND VALUE TO BE IGNORED 3.0
+         SLR   R1,RA                   LENGTH OF VALUE              2.0
+         STSV  RA,R1,0(RLX,RLIST)      ADDR,LEN OF VALUE TO OUT ENTR3.0
+         ALR   R1,RA                   RESTORE SCAN POINTER         2.0
+         BR    R14                                                  2.0
+         SPACE 4
+*
+*   RETURN
+*
+RETURN16 BAL   R14,RETURN
+RETURN12 BAL   R14,RETURN
+RETURN8  BAL   R14,RETURN
+RETURN4  BAL   R14,RETURN
+RETURN0  BAL   R14,RETURN
+*
+RETURN   LA    R14,0(,R14)
+         LA    R15,RETURN
+         SLR   R15,R14             (R15) = RETURN CODE NOW
+         L     R14,PARMIN          -> INPUT STRING POINTER
+         SL    R1,0(,R14)          (R1) = LENGTH OF SCANNED FIELD
+         CLI   PARMINTY,0              SHORT OR LONG INPUT PTR?    +2.0
+         BNE   PUTINW                  B.IF LONG                   +2.0
+           STC   R1,0(,R14)            STORE SCANNED LENGTH         2.0
+         B     PUTIN9                                              +2.0
+PUTINW     STH   R1,6(,R14)            STORE SCANNED LENGTH        +2.0
+PUTIN9   EQU   *                                                   +2.0
+         RETURN (14,12),T,RC=(15)                                   2.0
+         SPACE 4
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   CONSTANTS                                                         *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         LTORG ,
+DELIMIT  DC    AL1(1),C' '         STANDARD DELIMITER SET
+         DC    AL1(1),C','
+         DC    AL1(1),C'='
+         DC    AL1(1),C''''
+         DC    AL1(1),C'('
+         DC    AL1(1),C')'
+         SPACE 4
+*
+         END
+         TITLE 'BTXCSYM  -- CODE SYMBOL (KEYWORD TO BIN VALUE)'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+*   BTXCSYM -- CODE SYMBOL (KEYWORD TO BINARY VALUE)                  *
+*                                                                     *
+*CLASS:  STRING MANIPULATION; PARAMETER DECODING                      *
+*                                                                     *
+*FUNCTION: THIS ROUTINE DECODES A CHAR.STRING PARAMETER BY COMPARING  *
+*        IT AGAINST A LIST OF LEGAL STRINGS AND RETURNS THE CORRESPON-*
+*        DING CODE VALUE.                                             *
+*                                                                     *
+*INPUT:  THIS MODULE IS PREFERABLY CALLED BY MACRO 'BTXCSYM' ONLY.    *
+*                                                                     *
+*        (R0)    : -> STRING POINTER DESCRIBING THE PARAMETER VALUE   *
+*        (R1)    : -> LIST OF LEGAL VALUES, GENERATED BY BTXCSYM MF=L *
+*                                                                     *
+*OUTPUT: IF SYMBOL FOUND:                                             *
+*        (R0)    : VALUE ATTACHED TO SYMBOL IN SYMBOL TABLE, OR       *
+*                  1 TO N -- INDEX IDENTIFYING THE KEYWORD (POSITION  *
+*                  IN SYMBOL TABLE) IF VALLEN=0.                      *
+*        (R1)    : -> VALUE FIELD IN SYMBOL TABLE                     *
+*        (R15)=0; CC=P                                                *
+*      - IF INPUT SYMBOL STRING NULL (LEN IN STR.PTR = 0):            *
+*        (R0)    : 0                                                  *
+*        (R1)    : UNDEFINED                                          *
+*        (R15)=4; CC=Z                                                *
+*      - IF INPUT SYMBOL NOT FOUND IN TABLE:                          *
+*        (R0)    :                                                    *
+*        (R1)    :                                                    *
+*        (R15)=8; CC=M                                                *
+*                                                                     *
+*EXIT:   VIA (R14) ALWAYS                                             *
+*                                                                     *
+*CHANGE LEVEL:  1.0 -- 08JUN77  PAHL (GMD-RZ.BI)                      *
+*                                                                     *
+*AUTHOR: T. PAHL (GMD-RZ.BI)                                          *
+*                                                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         EJECT
+         PRINT NOGEN
+BTXCSYM  CSECT ,
+         MACRO
+&LABEL   IF    &A,&REL,&B,&GOTO,&ADDR
+.*
+.*  TEST AND BRANCH
+.*
+         LCLC  &CC
+         AIF   ('&REL' NE ':' AND '&REL' NE '¬:').COMP
+.*
+.*  BIT TEST
+.*
+&LABEL   TM    &A,&B
+&CC      SETC  'O'
+         AIF   ('&REL' EQ ':').GOTO
+&CC      SETC  'Z'
+         AGO   .GOTO
+.*
+.*  COMPARISON
+.*
+.COMP    AIF   ('&B' EQ '0').ZEROTEST
+         CH    &A,=Y(&B)
+         AGO   .ALLCOMP
+.ZEROTEST ANOP
+&LABEL   LTR   &A,&A
+.ALLCOMP ANOP
+&CC      SETC  'Z'
+         AIF   ('&REL' EQ 'EQ' OR '&REL' EQ '=').GOTO
+&CC      SETC  'L'
+         AIF   ('&REL' EQ 'LT' OR '&REL' EQ '<').GOTO
+&CC      SETC  'P'
+         AIF   ('&REL' EQ 'GT' OR '&REL' EQ '>').GOTO
+&CC      SETC  'NZ'
+         AIF   ('&REL' NE 'NE' AND '&REL' NE '¬=').YY
+.*
+.GOTO    AIF   ('&GOTO' EQ 'GOTO').GOTO1
+         BMCERMAC IF,23,GOTO,&GOTO,GOTO
+.GOTO1   AIF   ('&ADDR'(1,1) EQ '(').GOTOR
+         B&CC  &ADDR
+         MEXIT
+.GOTOR   B&CC.R &ADDR(1)
+         MEXIT
+.*
+.YY      BMCERMAC IF,0
+         MEND
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   REGISTER DEFINITIONS                                              *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+R13      EQU   13                      -> CALLER'S SAVE AREA
+R14      EQU   14                      LINK; WORK
+R15      EQU   15                      LINK; WORK
+R0       EQU   0                       PARAMETER; WORK
+R1       EQU   1                       PARAMETER;WORK
+R2       EQU   2                       WORK
+RPTR     EQU   3                       -> INPUT WORD (STR.PTR)
+RTAB     EQU   4                       -> SYMBOL TABLE
+RVAL     EQU   5
+RBASE    EQU   6                       PROGRAM BASE
+         SPACE 4
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   SYMBOL TABLE FORMAT                                               *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+SYMTAB   DSECT ,
+KEYCT    DS    X                       NUMBER OF KEYWORD CLASSES
+         DS    X'0',X'0'               RESERVED
+VALLEN   DS    X                       LENGTH OF VALUE (0-4)
+*   LIST OF KEYWORD,VALUE PAIRS FOLLOWS:
+SYMLST   DS    0C --- AL1(K),CL(K)'KEY',AL(VALLEN)(VALUE)
+         SPACE 4
+BTXCSYM  CSECT ,
+         SAVE  (14,06),,*
+         LR    RBASE,R15
+         USING BTXCSYM,RBASE
+         LR    RPTR,R0                 SAVE -> ARGUMENT WORD
+         LR    RTAB,R1                 SAVE -> SYMBOL TABLE
+         USING SYMTAB,RTAB
+         SR    RVAL,RVAL
+         IC    RVAL,VALLEN             FETCH SYMTAB VALUE LENGTH
+*
+         SR    R0,R0
+         IC    R0,0(,RPTR)             LENGTH OF PARAMETER VALUE
+         LTR   R2,R0
+         LA    R15,4                   PRESET RC = NULL INPUT CODE
+         BZ    CSYMRTN                 ZERO: PARAMETER OMITTED
+         L     RPTR,0(,RPTR)           -> PARAMETER VALUE
+         SR    R14,R14                 GET A COUNT BYTE
+         LA    R1,SYMLST               -> FIRST SYMBOL ENTRY
+*   LOOP OVER SYMBOL TABLE
+CSYM2    LA    R14,1(,R14)             COUNT LIST ENTRIES
+         IC    R2,0(,R1)               LENGTH OF VALUE IN LIST ENTRY
+         IF    R2,=,0,GOTO,CSYMRC8     B.IF END OF LIST
+         CLR   R2,R0                   COMPARE WITH LENGTH OF PARM
+         BNE   CSYM2C                  SKIP IF NO LENGTH MATCH
+         BCTR  R2,0                    LENGTH FITS, COMPARE PARAM
+         EX    R2,CSYMCLC              AGAINST LIST ENTRY.
+         LA    R2,1(,R2)
+         BE    CSYM2E                  B.IF FOUND.
+CSYM2C   LA    R1,1(R2,R1)
+         ALR   R1,RVAL                 -> NEXT ENTRY IN LIST
+         B     CSYM2                   LOOP UNTIL END OF LIST
+*   END OF NAME LIST: CODE NOT FOUND
+CSYMRC8  LA    R15,8                   SET RC = NOT FOUND
+         CR    R2,R15                  SET CC=-
+         B     CSYMRTN                 FAILURE: CODE NOT FOUND
+*   FOUND THE ENTRY
+CSYM2E   LA    R1,1(R2,R1)             -> VALUE
+         LR    R0,R14                  GET COUNT IDENTIFYING THE ENTRY
+         IF    RVAL,=,0,GOTO,CSYMRC0 DONE IF NO VALUE.
+*-       IC    RVAL,CSYMMASK-1(RVAL)   FETCH ICM MASK FOR VALLEN
+*-       EX    RVAL,CSYMICM            LOAD VALUE TO R0
+         LR    R14,R1                                               151
+         B     CSYM7B                                               151
+CSYM7A   LA    R14,1(,R14)             -> NEXT LOWER VALUE BYTE     151
+         SLL   R0,8                    MAKE ROOM                    151
+CSYM7B   IC    R0,0(,R14)              PICK A VALUE BYTE            151
+         BCT   RVAL,CSYM7A             LOOP OVER BYTES              151
+CSYMRC0  SR    R15,R15                 SET RC=OK
+         CR    R1,R15                  SET CC=+
+*** RETURN (ATTN: CC IS OUTPUT ALSO)
+CSYMRTN  L     R14,12(,R13)
+         LM    R2,RBASE,28(R13)        RESTORE CALLER'S REGS
+         MVI   12(R13),X'FF'           SET RETURN INDICATOR
+         BR    R14
+         SPACE 1
+*** EX'ED INSTRUCTIONS AND CONSTANTS
+CSYMCLC  CLC   0(*-*,RPTR),1(R1)
+CSYMICM  ICM   R0,*-*,0(R1)
+CSYMMASK DC    X'0103070F'
+         LTORG
+         END
+         TITLE 'BTXQUOTE -- UNQUOTE A QUOTED STRING'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+*   BTXQUOTE -- UNQUOTE A QUOTED STRING                               *
+*                                                                     *
+* CLASS:  STRING MANIPULATION                                         *
+*                                                                     *
+* FUNCTION:                                                           *
+*        THE PROGRAM UNQUOTES A PROPERLY QUOTED STRING.               *
+*        DOUBLE QUOTES ARE COMPRESSED TO SINGLE QUOTE, AND            *
+*        BEGINNING AND ENDING QUOTES OF THE STRING ARE DELETED.       *
+*                                                                     *
+* OPERATION:                                                          *
+*        THE COMPRESSION OF THE STRING IS EXECUTED IN TWO STEPS:      *
+*        1.) IF THE STRING BEGINS WITH A QUOTE,IT IS TESTED,          *
+*            WHETHER IT IS A LEGAL QUOTED STRING.                     *
+*            (LEGAL QUOTED STRING: ENCLOSED IN QUOTES,EACH INNER      *
+*            QUOTE IS REPRESENTED BY DOUBLE QUOTES)                   *
+*        2.) THE ENCLOSING QUOTES ARE DELETED AND DOUBLE QUOTES       *
+*            ARE COMPRESSED TO SINGLE QUOTE.  COMPRESSION IS DONE     *
+*            INPLACE BY SHIFTING TO THE LEFT.                         *
+*        BY THIS SEPARATE CHECK AND DO, THE STRING IS RETURNED UNMODI-*
+*        FIED TO THE CALLER IF IT IS IMPROPERLY FORMED.               *
+*                                                                     *
+* ENTRY POINTS:                                                       *
+*        BTXQUOTE -- (STANDARD LINKAGE)                               *
+*                                                                     *
+* INPUT: (R1)    : POINTS TO A (SHORT) STRING POINTER, WHICH IS A     *
+*                  FULLWORD HAVING THE FOLLOWING FORMAT:              *
+*        +-----------------+                                          *
+*        | L1   |          |------ ADDRESS OF SRING TO BE COMPRESSED  *
+*        +-----------------+                                          *
+*                                                                     *
+*        L1: LENGTH OF THE STRING TO BE COMPRESSED                    *
+* OUTPUT:                                                             *
+*        L1 HAS BEEN CHANGED TO THE LENGTH OF THE COMPRESSED STRING.  *
+*                                                                     *
+* EXIT-NORMAL:                                                        *
+*        VIA REGISTER 14                                              *
+*                                                                     *
+* EXIT-ERROR:                                                         *
+*        ALL ERRORS ARE HANDLED BY THE PROGRAM.                       *
+*                                                                     *
+* RETURN CODES:                                                       *
+*        0     SUCCESSFULL COMPLETION                                 *
+*        4     ILLEGAL QUOTED STRING                                  *
+*                                                                     *
+* EXTERNAL ROUTINES:                                                  *
+*        NONE                                                         *
+*                                                                     *
+* TABLES/WORK AREAS:                                                  *
+*        NONE                                                         *
+*                                                                     *
+* ATTRIBUTES:                                                         *
+*        REENTRANT,READ-ONLY                                          *
+*                                                                     *
+* RESTRICTIONS:                                                       *
+*        NONE                                                         *
+*                                                                     *
+* AUTHORIZATION REQUIRED:                                             *
+*        NONE                                                         *
+*                                                                     *
+* RELATED PGMS:                                                       *
+*        BTXSPCHR: COMPRESSES STRING THAT CONTAINS HEXADECIMAL        *
+*                  CHARACTERS.                                        *
+*        BTXQUOTS: COMPRESSES A NUMBER OF QUOTED STRING BY PASSING    *
+*                  STRING FOR STRING TO BTXQUOTE.                     *
+*STORAGE:PROGRAM:  0.25K                                              *
+*        DYNAMIC:  NONE                                               *
+*        BUFFER :  NONE                                               *
+*                                                                     *
+* LOAD MODULE CREATION:                                               *
+*        COMPILE LIBRARIES: BITS.MACLIB,SYS1.MACLIB                   *
+*        COMPILE PARAMETERS: NONE                                     *
+*        LINK-EDIT LIBRARIES: NONE                                    *
+*        LINK-EDIT PARAMETERS: RENT                                   *
+*        LINK-EDIT INPUT: NONE                                        *
+*                                                                     *
+* CHANGE LEVEL:  1.0 -- 01JUL71                                       *
+*                1.1 -- 12MAY75  PAHL                                 *
+* NOTES:                                                              *
+*        NONE                                                         *
+*                                                                     *
+* AUTHOR:HEESE/SYRING                                                 *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         EJECT
+         PRINT NOGEN
+BTXQUOTE CSECT
+         MACRO
+&LABEL   LSV   &REGA,&REGL,&ADDR
+.*
+         AIF   ('&REGA' EQ '' OR '&REGL' EQ '' OR '&ADDR' EQ '').Y1
+         AIF   ('&REGA' EQ '&REGL').Y2
+         AIF   ('&REGL' EQ '0' OR '&REGL' EQ 'R0').R0
+&LABEL   L     &REGL,&ADDR
+         LA    &REGA,0(,&REGL)         STRING ADDR (PURE)
+         SRL   &REGL,24                STRING LENGTH
+         MEXIT
+.R0      ANOP
+&LABEL   L     &REGA,&ADDR
+         LR    &REGL,&REGA
+         LA    &REGA,0(,&REGA)         STRING ADDR (PURE)
+         SRL   &REGL,24                STRING LENGTH
+         MEXIT
+.Y1      BMCERMAC LSP,001,,,,&LABEL
+         MEXIT
+.Y2      BMCERMAC LSP,067,FIRST,SECOND,,&LABEL
+         MEND
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*   REGISTER DEFINITIONS                                              *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+R13      EQU   13                      -> CALLER'S SAVE AREA
+R14      EQU   14                      LINK; WORK
+R15      EQU   15                      LINK; WORK
+R0       EQU   0                       RARELY USABLE
+R1       EQU   1                       -> STRING POINTER
+RSTR     EQU   2                       -> STRING
+RLEN     EQU   3                       LENGTH OF STRING
+RINCR    EQU   4                       INCREMENT = 1      )
+RLAST    EQU   5                       -> LAST CHAR       ) BXLE REGS
+RBASE    EQU   6                       PROGRAM BASE
+         SPACE 2
+C#QUOTE  EQU   C''''                   THIS IS WHAT WE CONSIDER A QUOTE
+         SPACE 4
+BTXQUOTE CSECT ,
+         SAVE  (14,06),T,*
+         LR    RBASE,R15
+         USING BTXQUOTE,RBASE
+         SR    R15,R15                 PRESET RETURN CODE = 0.
+         LSV   RSTR,RLEN,0(R1)         STRING ADDR,LEN
+         LTR   RLEN,RLEN
+         BNP   RETURN                  NULL STRING, O.K.
+         LA    RINCR,1                 INCREMENT = 1.
+***********************************************************************
+* TEST SYNTAX                                                         *
+***********************************************************************
+         CLI   0(RSTR),C#QUOTE        FIRST CHAR MUST BE A QUOTE
+         BNE   RETURN                  STRING NOT QUOTED, O.K.
+         BCT   RLEN,CHECK              JUMP IF > 1 CHARACTER.
+ERROR    LA    R15,4                   ILLEGAL INPUT
+         B     RETURN
+*   RUN THRU STRING WATCHING USE OF QUOTES
+CHECK    LA    RLAST,0(RLEN,RSTR)      SET POINTER TO LAST CHAR
+         CLI   0(RLAST),C#QUOTE        LAST CHAR MUST BE A QUOTE
+         BNE   ERROR
+         BCTR  RLAST,0                 DROP TRAILING QUOTE
+         BCT   RLEN,CHECKBX            JUMP IF SOMETHING BETWEEN QUOTES
+         STC   RLEN,0(,R1)             LEN=0: STRING WAS  '' .
+         B     RETURN
+CHECKIT  CLI   0(RSTR),C#QUOTE         IS CHAR A QUOTE?
+         BNE   CHECKBX                 B.IF NOT.
+         BXH   RSTR,RINCR,ERROR        THEN THERE MUST BE ANOTHER CHAR
+         CLI   0(RSTR),C#QUOTE         AND IT MUST BE THE PAIRING QUOTE
+         BNE   ERROR                   NO:  STRING IMPROPERLY FORMED.
+CHECKBX  BXLE  RSTR,RINCR,CHECKIT
+         L     RSTR,0(,R1)             RESET POINTER
+         LA    RSTR,0(,RSTR)
+***********************************************************************
+* COMPRESS STRING                                                     *
+***********************************************************************
+         BCTR  RLEN,0                  LENGTH WITH OUTER QUOTES OFF -1
+         EX    RLEN,MVCDROP            DROP LEADING (AND TRAILING) QUOT
+         LA    RLAST,0(RLEN,RSTR)      END ADDR FOR BXLE
+COMPR    CLI   0(RSTR),C#QUOTE         IS CHAR A QUOTE?
+         BNE   COMPRBX                 B.IF NOT.
+         SR    RLAST,RSTR              RESIDUAL LENGTH OF STRING
+         BCTR  RLAST,0
+         EX    RLAST,MVCDROP           DROP ONE OF THE QUOTE PAIR
+         AR    RLAST,RSTR              END ADDR FOR BXLE
+COMPRBX  BXLE  RSTR,RINCR,COMPR
+***********************************************************************
+* OUTPUT UNQUOTED STRING LENGTH                                       *
+***********************************************************************
+         L     RLAST,0(,R1)
+         LA    RLAST,0(,RLAST)         LOAD START ADDR OF INPUT STRING
+         SR    RSTR,RLAST              ACTUAL LENGTH
+         STC   RSTR,0(,R1)             INSERT LEN OF COMPRESSED STRING
+RETURN   RETURN (14,06),T,RC=(15)
+         SPACE 2
+*   EX'ED INSTRUCTION
+MVCDROP  MVC   0(*-*,RSTR),1(RSTR)     DROP A QUOTE FROM STRING
+         LTORG ,
+         END
+         END

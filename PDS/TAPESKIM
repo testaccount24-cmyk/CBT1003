@@ -1,0 +1,1234 @@
+TAPESKIM TITLE '- PROGRAM DESCRIPTION'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*                                                                     *
+*                                                                     *
+*        T A P E S K I M                                              *
+*                                                                     *
+*                                                                     *
+* <CLASS>:  UTILITY  (MAGNETIC TAPE TEST AND RECOVERY)                *
+*                                                                     *
+*                                                                     *
+* <FUNCTION/OPERATION>:  TAPESKIM READS A TAPE WITH EXCP OMITTING ANY *
+*        ERROR RECOVERY PROCEDURES AND PRINTS INFORMATION ABOUT EACH  *
+*        BLOCK AND/OR ABOUT EACH FILE AND I/O ERROR. THE HEADER LINE  *
+*        OF EVERY PAGE CONTAINS THE PARAMETERS PASSED TO TAPESKIM AND *
+*        THE VOLUME SERIAL NUMBER SPECIFIED ON THE DD STATEMENT.      *
+*                                                                     *
+*        FURTHER EXPLANATIONS SEE UNDER 'INPUT'.                      *
+*                                                                     *
+*                                                                     *
+* <ENTRY POINTS>:  TAPESKIM                                           *
+*                                                                     *
+*                                                                     *
+* <INPUT>:  TAPESKIM EXPECTS A PARM FIELD FROM AN EXEC STATEMENT:     *
+*                                                                     *
+*                   +----+---------+    +----------+----------------+ *
+*           R1 ---> | 80 |    -----|--> | LEN OR 0 |   PARAMETERS   | *
+*                   +----+---------+    +----------+----------------+ *
+*                                                                     *
+*           THE FOLLOWING PARAMETERS ARE RECOGNIZED:                  *
+*                                                                     *
+*           - MODE=B<LOCK> : TAPESKIM READS THE TAPE UP TO ITS LOGICAL*
+*                      OR PHYSICAL END (DEPENDING ON PARAMETER EOT)   *
+*                      AND PRINTS FOR EVERY BLOCK:                    *
+*                      - ITS LENGTH,                                  *
+*                      - ITS BEGINNING AND END AS TEXT AND HEX.,      *
+*                      - ERROR INDICATORS IF THIS BLOCK CAUSED AN I/O *
+*                        ERROR: - COMPLETION CODE FROM ECB,           *
+*                               - STATUS BYTES FROM CSW,              *
+*                               - SENSE BYTES 0 AND 1,                *
+*                      AND IN ADDITION A SUMMARY FOR EVERY FILE:      *
+*                      - FILE NUMBER,                                 *
+*                      - NUMBER OF BLOCKS IN FILE,                    *
+*                      - NUMBER OF BYTES IN FILE,                     *
+*                      - NUMBER OF I/O ERRORS IN FILE,                *
+*                      - MINIMUM BLOCK LENGTH, AND                    *
+*                      - MAXIMUM BLOCK LENGTH.                        *
+*           - MODE=L<ABEL> : ONLY THE FIRST 3 BLOCKS OF EVERY FILE,   *
+*                      EVERY BLOCK CAUSING AN I/O ERROR, AND THE FILE *
+*                      SUMMARIES ARE PRINTED.                         *
+*           - MODE=F<ILE> : ONLY THE FILE SUMMARIES AND THE BLOCKS    *
+*                      CAUSING I/O ERRORS ARE PRINTED.                *
+*             DEFAULT: MODE=L                                         *
+*                                                                     *
+*           NOTE:   THE TAPE IS ALWAYS REWOUND BEFORE PROCESSING      *
+*                   BEGINS.                                           *
+*                                                                     *
+*           - SKIP=(FILES,BLOCKS) : THE SPECIFIED NUMBER OF FILES AND *
+*                      THEN THE SPECIFIED NUMBER OF BLOCKS ARE SKIPPED*
+*                      BEFORE NORMAL PROGRAM OPERATION BEGINS. A TAPE *
+*                      MARK ENCOUNTERED WHILE SKIPPING BLOCKS IS      *
+*                      CONSIDERED AN ERROR.                           *
+*             DEFAULT: SKIP=(0,0)                                     *
+*                                                                     *
+*           - PRINT=(FILES,BLOCKS) : TAPESKIM TERMINATES AFTER THE    *
+*                      SPECIFIED NUMBER OF FILES AND THEN THE         *
+*                      SPECIFIED NUMBER OF BLOCKS (INCLUDING TAPE     *
+*                      MARKS) HAVE BEEN PROCESSED.                    *
+*             DEFAULT: NO LIMIT. IF ONLY ONE SUBPARAMETER IS          *
+*                      SPECIFIED, THE OTHER ONE DEFAULTS TO 0.        *
+*                                                                     *
+*           - EOT : IF SPECIFIED, THE TAPE IS READ UP TO ITS PHYSICAL *
+*                      END.                                           *
+*                   IF NOT SPECIFIED, THE TAPE IS READ UNTIL TWO      *
+*                      CONSECUTIVE TAPE MARKS ARE ENCOUNTERED OR      *
+*                      UNTIL INTERFACE CONTROL CHECK (= TIMEOUT)   +3.5
+*                      OR 'NOT CAPABLE' IS SIGNALED.               +3.5
+*                      (EXCEPTION: AN EMPTY DATA SET ON A STANDARD    *
+*                      LABEL TAPE DOES NOT SIGNAL END-OF-TAPE.)       *
+*                                                                  +2.7
+*           - ASCII :  IF SPECIFIED AND THE TAPE IS FOUND TO BE A  +2.7
+*                      NO-LABEL-TAPE THE DATA FROM THE TAPE ARE    +2.7
+*                      INTERPRETED AS ASCII TEXT.                  +2.7
+*                                                                  +2.7
+*           NOTE:   AL TAPES ARE ALWAYS INTERPRETED AS ASCII;      +2.7
+*                   SL TAPES ARE ALWAYS INTERPRETED AS EBCDIC.     +2.7
+*                                                                     *
+*                                                                     *
+* <OUTPUT>:  NONE                                                     *
+*                                                                     *
+*                                                                     *
+* <DD-STATEMENTS/DATA SETS>:                                          *
+*        //SYSPRINT DD SYSOUT=A                                       *
+*        //TAPE     DD UNIT=(TAPE,,DEFER),VOL=SER=VOLSER,             *
+*        //            LABEL=(,BLP),DISP=(OLD,PASS)                   *
+*                                                                     *
+*                                                                     *
+* <NORMAL EXIT>:  RETURN VIA R14                                      *
+*                                                                     *
+*                                                                     *
+* <ERROR EXIT>:  RETURN VIA R14                                       *
+*                                                                     *
+*                                                                     *
+* <RETURN CODES>:  0 = NORMAL COMPLETION, NO ERRORS ON TAPE         2.3
+*                  4 = TAPE UNIT LOST READY, NO OTHER ERRORS,      +2.3
+*                      'EOT' WAS SPECIFIED'                        +2.3
+*                  8 = TAPE UNIT LOST READY, NO OTHER ERRORS,      +2.3
+*                      'EOT' WAS NOT SPECIFIED                     +2.3
+*                 12 = AT LEAST 1 ERROR ENCOUNTERED WHILE READING  +2.3
+*                      TAPE WITHOUT LOSING READY                   +2.3
+*                 16 = PRINT=(0,0) REQUESTED AND EXECUTED           2.3
+*                 20 = EOF MET WHILE SKIPPING BLOCKS                2.3
+*                 24 = INVALID PARAMETERS                           2.3
+*                 28 = DD STATEMENT MISSING                         2.3
+*                 32 = I/O ERROR WHILE SKIPPING FILES               2.3
+*                 36 = LOGICAL END OF TAPE MET WHILE SKIPPING       2.3
+*                 40 = END OF MULTI-VOLUME DATA SET WHILE SKIPPING +2.4
+*                 44 = SPECIFIED UNIT IS NO TAPE DEVICE            +3.2
+*                                                                     *
+*                                                                     *
+* <EXTERNAL ROUTINES>:  BTXCSCAN SCANS AND CONVERTS THE PARM FIELD    *
+*                                                                     *
+*                                                                     *
+* <TABLES/WORK AREAS>:  READ ONLY:  DEB, UCB                          *
+*                       READ/WRITE:  DCB, ECB, IOB                    *
+*                                                                     *
+*                                                                     *
+* <ATTRIBUTES>:  NOT REUSABLE;                                        *
+*                I/O USES EXCP FOR TAPE AND QSAM FOR SYSPRINT.        *
+*                                                                     *
+*                                                                     *
+* <RESTRICTIONS>:  BLOCK SIZES > 65534 ARE NOT RECOGNIZED; THEY ARE   *
+*                  PRINTED AS '*****' AND COUNTED AS 65535.           *
+*                                                                     *
+*                  ONLY 3420 9-TRACK TAPE UNITS AND 3480 ARE        3.4
+*                  SUPPORTED.                                       3.4
+*                                                                     *
+*                                                                     *
+* <AUTHORIZATION REQUIRED>:  NONE                                     *
+*                                                                     *
+*                                                                     *
+* <RELATED PROGRAMS>:  TAPESCAN - LISTS LABEL INFORMATION FROM A      *
+*                                 STANDARD LABEL TAPE                 *
+*                                                                     *
+*                                                                     *
+* <STORAGE>:                                                          *
+*        PROGRAM:  74 K, INCLUDING 64 K BUFFER                        *
+*        DYNAMIC:  NONE                                               *
+*        BUFFER :  STATIC, INCLUDED IN PROGRAM                        *
+*                                                                     *
+*                                                                     *
+* <LOAD MODULE CREATION>:                                             *
+*      SOURCE LANGUAGE      :  ASSEMBLER H                            *
+*      COMPILE LIBRARIES    :  SYS1.MACLIB                          2.5
+*                              SYS1.AMODGEN                         2.5
+*                              GMD.MACLIB                           2.5
+*      COMPILE PARAMETERS   :  --                                     *
+*      LINK-EDIT LIBRARIES  :  RZ.LINKLIB                             *
+*      LINK-EDIT PARAMETERS :  --                                     *
+*      LINK-EDIT INPUT      :  --                                     *
+*      DESTINATION LIBRARIES:  GMD.GOLIB                              *
+*                                                                     *
+*      GENERATING DECK      :  GMD.JCL(TAPESKIM)                      *
+*                                                                     *
+*                                                                     *
+* <STATUS>:  CHANGE LEVEL 3.6 - 22JAN88                             3.6
+*                                                                     *
+*                                                                     *
+* <NOTES>:  PROCEDURE:  GMD.PROCLIB(UTPSKIM)                          *
+*                                                                     *
+*                                                                     *
+* <AUTHOR>:  V. BLASIUS, GMD-RZ.BN, JAN76 - 1.0 - PRINT ALL BLOCKS    *
+*                                 05APR77 - 2.0 - PARAMETERS          *
+*                                 01JUL77 - 2.1 - LABEL MODE          *
+*                                 19APR78 - 2.2 - DENSITY             *
+*                                 06NOV80 - 2.3 - NEW RETURN CODES +2.3
+*                                 03SEP81 - 2.4 - EOT AFTER EOV+TM +2.4
+*                                 08JUN82 - 2.5 - COMPRESS LISTING +2.5
+*                                 21JUL82 - 2.6 - ANSI LABELS      +2.6
+*                                 06MAR84 - 2.7 - NL ASCII TAPES   +2.7
+*                                 19APR84 - 3.0 - HEX VERTICAL     +3.0
+*                                 29OCT85 - 3.1 - CHANGE FSB LOGIC +3.1
+*                                 23JAN86 - 3.2 - TEST FOR TAPE    +3.2
+*                                 23JAN86 - 3.3 - TIMEOUT SUPPORT  +3.3
+*                                 24JAN86 - 3.4 - 3480 SUPPORT     +3.4
+*                                 30JAN86 - 3.5 - SUPPORT FOR NCA  +3.5
+*                                 22JAN88 - 3.6 - MSG TEXT CHANGE  +3.6
+*                                                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         TITLE '- MACRO DEFINITIONS'
+         MACRO
+&L       BEOF  &TO                 BRANCH IF END OF FILE
+&L       CLI   ECBCC,ECBPERR
+         BNE   *+24                                                 3.1
+         CLC   IOBSTBYT(2),=X'0D00'  CE + DE + UE
+         BE    &TO
+         CLC   IOBSTBYT(2),=X'2500'  CUE + DE + UE                 +3.1
+         BE    &TO                                                 +3.1
+         MEND
+         SPACE 5
+         MACRO
+&L       BLEOT &TO                 BRANCH ON LOGICAL END OF TAPE
+&L       TM    FLAGS2,SL+AL        ANOTHER TAPEMARK: SL OR AL TAPE? 2.6
+         BZ    &TO                 LOGICAL END OF TAPE IF NOT
+         L     R1,FILE#
+         SR    R0,R0
+         D     R0,=F'3'            SL OR AL: FILE# / 3              2.6
+         CH    R0,=H'2'            JUST AN EMPTY DATA SET ?
+         BNE   &TO                 NO, LOGICAL END OF TAPE
+         MEND
+         SPACE 5
+         MACRO
+&L       BNEOF &TO                 BRANCH IF NOT END OF FILE
+&L       CLI   ECBCC,ECBPERR
+         BNE   &TO
+         CLC   IOBSTBYT(2),=X'0D00'  CE + DE + UE
+         BNE   &TO
+         MEND
+         SPACE 5                                                   +2.4
+         MACRO                                                     +2.4
+&L       BNEOV1 &TO                BRANCH IF NOT 'EOV1' LABEL      +2.4
+&L       TM    FLAGS2,SL+AL                                         2.6
+         BZ    &TO                 NO EOV LABEL IF NOT SL OR AL     2.6
+         L     R1,FILE#            GET CURRENT FILE NUMBER         +2.4
+         SR    R0,R0                                               +2.4
+         D     R0,=F'3'                                            +2.4
+         LTR   R0,R0                                               +2.4
+         BNZ   &TO                 NO EOV IF NO MULTIPLE OF 3      +2.4
+         SR    R1,R1                                               +2.4
+         ICM   R1,B'0011',READFW+6 =LENGTH TO BE READ FROM CCW     +2.4
+         SR    R0,R0                                               +2.4
+         ICM   R0,B'0011',IOBCSW+5 RESIDUAL COUNT FROM CSW         +2.4
+         SR    R1,R0               R1 = LENGTH OF BLOCK JUST READ  +2.4
+         CH    R1,=H'80'                                           +2.4
+         BNE   &TO                 NO EOV IF BLOCK LENGTH NOT 80   +2.4
+         MVC   XLATEBUF(4),BUFFER  COPY 1ST 4 BYTES OF RECORD      +2.6
+         TM    FLAGS2,AL           HAS TAPE ANSI LABELS ?          +2.6
+         BZ    @&SYSNDX            NO, OK                          +2.6
+         XLATE XLATEBUF,4,TO=E     YES, TRANSLATE TO EBCDIC        +2.6
+@&SYSNDX CLC   XLATEBUF(4),=C'EOV1'                                 2.6
+         BNE   &TO                 NO EOV LABEL IF NOT 'EOV1'      +2.4
+         MEND                                                      +2.4
+         SPACE 5
+         MACRO
+&L       BNOK  &TO                 BRANCH IF I/O NOT OK
+&L       CLI   ECBCC,ECBNORM
+         BNE   &TO
+         MEND
+         SPACE 5
+         MACRO
+&L       BOK   &TO                 BRANCH IF I/O OK
+&L       CLI   ECBCC,ECBNORM
+         BE    &TO
+         MEND
+         SPACE 5
+         MACRO
+&N       DEC   &TO,&FROM,&LEN      AN ODD NUMBER > 2 OF DECIMAL DIGITS
+         LCLA  &I                  USES R0 IF &FROM IS NO REGISTER
+         LCLC  &R,&L,&PAT
+&L       SETC  '&N'
+&PAT     SETC  '202120'
+&I       SETA  3
+.PATLOOP AIF   (&I GE &LEN).REG
+&PAT     SETC  '2020&PAT'
+&I       SETA  &I+2
+         AGO   .PATLOOP
+.*
+.REG     ANOP
+&R       SETC  'R0'
+         AIF   ('&FROM'(1,1) NE '(').LOAD
+&R       SETC  '&FROM(1)'
+         AGO   .CVD
+.*
+.LOAD    ANOP
+&L       L     &R,&FROM
+&L       SETC  ''
+.CVD     ANOP
+&L       CVD   &R,D
+         MVC   &TO.(&LEN),=X'&PAT'
+.F       ED    &TO-1(&LEN+1),D+7-(&LEN-1)/2
+         MEND
+         SPACE 5
+         MACRO
+&N       DPUT  &DCB,&DATA          DOUBLE PRINT A LINE
+&N       PUT   &DCB,&DATA          USES THE SAME REGISTERS AS PUT
+         MVI   &DATA,C'+'
+         PUT   &DCB,&DATA
+         PUT   &DCB,&DATA
+         MEND
+         SPACE 5
+         MACRO
+&N       HEX   &TO,&FROM,&LEN      MAXIMUM 8 HEX DIGITS
+         LCLC  &R
+         AIF   ('&FROM'(1,1) EQ '<').INDIR
+&N       UNPK  DX(&LEN+1),&FROM.(&LEN/2+1)
+         AGO   .TR
+.INDIR   ANOP
+&R       SETC  '&FROM'(2,K'&FROM-2)
+&N       UNPK  DX(&LEN+1),0(&LEN/2+1,&R)
+.TR      TR    DX(&LEN),HEXTAB
+         MVC   &TO.(&LEN),DX
+         MEND
+         SPACE 5
+         MACRO
+&L       MIN   &R,&WORD            &R = MIN(&R,&WORD)
+&L       C     &R,&WORD
+         BNH   *+8
+         L     &R,&WORD
+         MEND
+         SPACE 5
+         MACRO
+&L       MVOL  &TO,&FROM           132 TO 133 BYTES                 3.0
+&L       LA    R14,10*12+&TO       USES R0, R14, R15                3.0
+         LA    R15,10*12+&FROM                                      3.0
+         LA    R0,11                                                3.0
+         MVO   0(13,R14),0(12,R15)                                  3.0
+         SH    R14,=H'12'                                           3.0
+         SH    R15,=H'12'                                           3.0
+         BCT   R0,*-14
+         MEND
+         SPACE 5
+         MACRO
+&L       PRTAB &FILL ,(AT,#CHARS),... OR (AT,NEWVALUE),...
+         LCLA  &I
+&L       DC    &FILL
+&I       SETA  1
+.NEXT    ANOP
+&I       SETA  &I+1
+         AIF   (&I GT N'&SYSLIST).END
+         ORG   &L+&SYSLIST(&I,1)
+         AIF   (T'&SYSLIST(&I,2) NE 'N').NONUM
+         DC    &SYSLIST(&I,2)AL1(*-&L)
+         AGO   .NEXT
+.NONUM   DC    &SYSLIST(&I,2)
+         AGO   .NEXT
+.END     ORG
+         MEND
+         SPACE 5
+         MACRO
+&L       XCP   &CP
+&L       LA    1,&CP
+         ST    1,IOBSTART          A(CHANNEL PROGRAM) TO IOB
+$&SYSNDX NI    DCBIFLGS,X'FF'-DCBIFPEC   RESET 'PERMANENT ERROR'    3.4
+@&SYSNDX EXCP  IOBSTDRD
+         WAIT  ECB=ECB
+         CLI   ECBCC,ECBINCPT
+         BE    @&SYSNDX            RESTART IF CE FROM PREVIOUS REQUEST
+         CLI   ECBCC,ECBPERR                                       +3.4
+         BNE   #&SYSNDX                                            +3.4
+         TM    IOBUSTAT,X'02'      UNIT CHECK                      +3.4
+         BZ    #&SYSNDX                                            +3.4
+         TM    IOBSENS0,X'02'      RESTART IF OVERRUN              +3.4
+         BO    $&SYSNDX                                            +3.4
+#&SYSNDX DS    0H                                                  +3.4
+         MEND
+         TITLE '- ASSEMBLY TIME CONSTANTS AND VARIABLES'
+         PRINT NOGEN
+TAPESKIM CSECT
+         SPACE 3
+R0       EQU   0                   PARAMETER AND WORK REGISTER
+R1       EQU   1                   PARAMETER AND WORK REGISTER
+R2       EQU   2                   WORK REGISTER
+R3       EQU   3                   WORK REGISTER
+R4       EQU   4                   NOT USED
+R5       EQU   5                   NOT USED
+R6       EQU   6                   NOT USED
+R7       EQU   7                   NOT USED
+R8       EQU   8                   COUNT REGISTER FOR FILES/BLOCKS
+R9       EQU   9                   BASE REGISTER FOR DCB'S
+R10      EQU   10                  BASE REGISTER FOR PROGRAM
+R11      EQU   11                  BASE REGISTER FOR PROGRAM
+R12      EQU   12                  BASE REGISTER FOR PROGRAM        3.3
+R13      EQU   13                  BASE REGISTER FOR SAVE AREA
+R14      EQU   14                  LINK AND WORK REGISTER
+R15      EQU   15                  LINK AND WORK REGISTER
+         SPACE  3
+CC       EQU   X'40'               CCW: COMMAND CHAINING
+SLI      EQU   X'20'                    SUPPRESS LENGTH INDICATION
+SKP      EQU   X'10'                    SUPPRESS DATA TRANSFER
+         SPACE 3
+#        EQU   0                   DUMMY SYMBOL FOR RUN TIME VALUES
+         SPACE 3
+         DCBD  DSORG=XE,DEVD=TA    DSECT FOR DCB
+         SPACE 3
+         IEZDEB ,                  DSECT FOR DEB
+         SPACE 3
+         IEFUCBOB PREFIX=YES       DSECT FOR UCB
+         SPACE 3
+         TITLE '- MAIN PROGRAM CODE - INITIALIZATION'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        DETERMINE PARAMETER VALUES                                   *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE
+TAPESKIM CSECT
+         PROLOG ID=TAPESKIM-3.6-22JAN88-BLASIUS,                    3.6-
+               SSA=*,BASE=(R10,R11,R12)                             3.3
+         L     R1,0(,R1)           R1 --> PARM FIELD FROM EXEC CARD
+         ICM   R2,B'0011',0(R1)    GET LENGTH OF PARM FIELD
+         BZ    OPEN                USE DEFAULTS IF NO PARM FIELD
+         LA    R1,2(,R1)           SKIP LENGTH FIELD
+         ST    R1,EXECPARM         --> PARM TEXT FOR BTXCSCAN
+         STC   R2,EXECPARM         LENGTH OF PARM TEXT FOR BTXCSCAN
+         SPACE
+         BLANK TITPARMS,L'TITPARMS CLEAR TITLE 'NO PARAMETERS'
+         MIN   R2,=A(L'TITPARMS)   R2 = MIN(L'PARMS,SPACE IN TITLE)
+         BCTR  R2,0                INSERT PARAMETERS INTO TITLE
+         EX    R2,MVC5             MVC  TITPARMS(#),0(R1)
+         SPACE
+         CALL  BTXCSCAN,MF=(E,BTXCPARM)   GO DECODE PARAMETERS
+         LTR   R15,R15
+         BNZ   PARMERR             GO TERMINATE IF PARAMETER ERROR
+         SPACE
+MODEPARM CLI   MODE,0              MODE SPECIFIED ?
+         BE    SKIPPARM            NO, GO TEST FOR SKIP/PRINT
+         L     R1,MODE             YES, GET A(PARAMETER VALUE)
+         CLI   0(R1),C'L'
+         BE    SKIPPARM            OK IF LABEL MODE (= DEFAULT)
+         NI    FLAGS1,X'FF'-LABLMODE
+         CLI   0(R1),C'B'          ELSE DECODE BLOCK MODE
+         BE    SKIPPARM
+         CLI   0(R1),C'F'          OR FILE MODE
+         BNE   PARMERR             OR TERMINATE IF UNKNOWN
+         OI    FLAGS1,FILEMODE
+         SPACE
+SKIPPARM CLI   SKIP,0              'SKIP=(FILES,BLOCKS)' SPECIFIED ?
+         BE    PRNTPARM            NO, ASSUME (0,0)
+         L     R15,SKIP            YES, GET STRING POINTER TO VALUE
+         BAL   R14,PARMCONV        GO CONVERT TO 2 BINARY INTEGERS
+         STM   R0,R1,SKIPVALS      SAVE VALUES
+         SPACE
+PRNTPARM CLI   PRINT,0             'PRINT=(FILES,BLOCKS)' SPECIFIED ?
+         BE    EOTPARM             NO, ASSUME (ALL,ALL)
+         L     R15,PRINT           YES, GET STRING POINTER TO VALUE
+         BAL   R14,PARMCONV        GO CONVERT TO 2 BINARY INTEGERS
+         STM   R0,R1,PRNTVALS      SAVE VALUES
+         LTR   R0,R0               FILE LIMIT SPECIFIED ?
+         BNP   BLIMTEST
+         OI    FLAGS1,FLIMIT       YES, SET 'PRINT UNDER FILE LIMIT',
+         LR    R8,R0                    LOAD COUNT REGISTER,
+         B     EOTPARM                  AND DO NOT SET BLOCK LIMIT
+BLIMTEST LTR   R1,R1               NO, BLOCK LIMIT SPECIFIED ?
+         BNP   PRINT00             NO, GO TERMINATE
+         OI    FLAGS1,BLIMIT       YES, SET 'PRINT UNDER BLOCK LIMIT'
+         LR    R8,R1                    AND LOAD COUNT REGISTER
+         SPACE
+EOTPARM  ICM   R1,B'1111',EOT      'EOT' SPECIFIED ?
+         BZ    ASCIPARM            NO, STOP AT LOGICAL END OF TAPE  2.7
+         OI    FLAGS1,FULLTAPE     YES, SCAN UNTIL PHYSICAL END OF TAPE
+         SPACE ,                                                   +2.7
+ASCIPARM ICM   R1,B'1111',ASCII    'ASCII' SPECIFIED ?             +2.7
+         BZ    OPEN                NO, INTERPRET NL TAPE AS EBCDIC +2.7
+         OI    FLAGS1,XLATE        YES, INTERPRET NL TAPE AS ASCII +2.7
+         EJECT
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        OPEN DCB'S AND INITIALIZE                                    *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE
+OPEN     OPEN  (TAPE,,SYSPRINT,OUTPUT)
+         LA    R9,SYSPRINT
+         USING IHADCB,R9
+         TM    DCBOFLGS,DCBOFOPN   PRINT DCB OPEN ?
+         BZ    NOPRINT             GO TERMINATE IF NOT
+         LA    R9,TAPE
+         TM    DCBOFLGS,DCBOFOPN   TAPE DCB OPEN ?
+         BZ    NOTAPE              ERROR IF NOT
+         SPACE
+         BLANK IOB,IOB#,X'00'      CLEAR IOB
+         MVI   IOBFLAG1,IOBUNREL   SET 'UNRELATED'
+         LA    R1,ECB
+         ST    R1,IOBECBPT         A(ECB) TO IOB
+         ST    R9,IOBDCBPT         A(TAPE DCB) TO IOB
+         SPACE
+         XCP   REW                 REWIND INPUT TAPE
+         XCP   NOP                 WAIT FOR COMPLETION OF REW
+         SPACE
+         L     R1,DCBDEBAD         --> DEB
+         USING DEBBASIC,R1
+         L     R1,DEBSUCBA         --> UCB
+         USING UCBCMSEG,R1
+         CLI   UCBDVCLS,UCB3TAPE                                   +3.2
+         BNE   WRONGDEV            GO RETURN IF NO TAPE DEVICE     +3.2
+         SPACE ,                                                   +3.4
+         CLI   UCBUNTYP,UCB3480    ELSE TEST TAPE UNIT TYPE        +3.4
+         BNE   GETVOLI             OK IF 3420                      +3.4
+         OI    FLAGS2,DT3480       ELSE SET 'DEVICE TYPE IS 3480'  +3.4
+         SPACE ,                                                   +3.2
+GETVOLI  MVC   TITLEVOL(6),UCBVOLI EXTRACT VOLUME SERIAL NUMBER     3.4
+         MVC   WTOEOT+4+25(6),UCBVOLI
+         DROP  R1
+         XCP   READVOL1            TRY TO READ VOLUME LABEL
+         BNOK  NOTSL               NOT SL/AL IF NOT 80 BYTES LONG   2.6
+         CLC   BUFFER(4),=C'VOL1'  IF 80, CORRECT VOLUME LABEL ?
+         BE    NOXLATE             YES, TAPE IS IBM STANDARD LABEL  2.7
+         XI    FLAGS2,SL+AL        NO, RESET SL, SET AL            +2.6
+         MVI   TITLELAB,C'A'                                       +2.6
+         XLATE BUFFER,4,TO=E       TRANSLATE FROM ASCII TO EBCDIC  +2.6
+         CLC   BUFFER(4),=C'VOL1'  CORRECT LABEL AFTER TRANSLATE ? +2.6
+         BNE   NOTSL                                               +2.7
+         OI    FLAGS1,XLATE        YES, TAPE HAS ANSI LABELS       +2.7
+         B     DENSITY                                              2.7
+         SPACE ,                                                   +2.7
+NOTSL    NI    FLAGS2,X'FF'-SL-AL  NO, RESET 'STANDARD LABELS'      2.7
+         MVI   TITLELAB,C'N'                                       +2.6
+         B     DENSITY                                             +2.7
+         SPACE
+NOXLATE  NI    FLAGS1,X'FF'-XLATE  IBM SL TAPE, DO NOT TRANSLATE   +2.7
+DENSITY  TM    FLAGS2,DT3480       3420 OR 3480 TAPE UNIT ?        +3.4
+         BO    REWIND              'CASSETTE' IF 3480              +3.4
+         MVC   TITLEDEN(8),=C'NO SENSE'                            +3.4
+         XCP   SENSE               ELSE READ 24 SENSE BYTES         3.4
+         BNOK  REWIND              'NO SENSE' IF ERROR
+         MVC   TITLEDEN(8),=C' 7-TRACK'
+         TM    BUFFER+6,X'80'      DECODE TAPE DENSITY:
+         BO    REWIND              '7-TRACK' IF '7-TRACK TAPE UNIT'
+         MVC   TITLEDEN(8),=C'1600 BPI'
+         TM    BUFFER+6,X'10'
+         BZ    REWIND              '1600' IF NOT 'NOT SET TO 1600 BPI'
+         MVC   TITLEDEN(4),=C'6250'
+         TM    BUFFER+6,X'08'
+         BO    REWIND              '6250' IF '¬ 1600' AND 'MODEL 4/6/8'
+         MVC   TITLEDEN(4),=C' 800' '800' IF '¬ 1600' AND 'MODEL 3/5/7'
+         SPACE
+REWIND   XCP   REW                 REWIND TAPE
+         XCP   NOP                 WAIT FOR COMPLETION OF REW
+         SPACE
+TITLE1   TM    FLAGS1,FILEMODE
+         BO    PAGE1               OK IF IN FILE MODE
+         MVC   TITLER(TITLEVAR-TITLER),TITLER+1   ELSE SHIFT TITLE
+         MVC   TITLEVAR(5),=C'BLOCK'              AND INSERT 'BLOCK'
+         TM    FLAGS1,LABLMODE
+         BZ    PAGE1
+         MVC   TITLEVAR(5),=C'LABEL'              OR 'LABEL'
+PAGE1    DEC   TITLEPAG,PAGE#,3    INSERT PAGE NUMBER
+         PUT   SYSPRINT,TITLE      PRINT INITIAL TITLE
+         SPACE
+         TM    FLAGS2,DT3480       3420 OR 3480 TAPE UNIT ?        +3.4
+         BO    SKIPFILE            OK IF 3480                      +3.4
+         TM    FLAGS1,FULLTAPE     3420: FULL TAPE ANALYSIS MODE ?
+         BZ    SKIPFILE            NO, OK
+         WTO   MF=(E,WTOEOT)       YES, 'BAND WIRD DURCHGEZOGEN'
+         TITLE '- MAIN PROGRAM CODE - SKIP BEFORE READING'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        SKIP FILES IF SPECIFIED                                      *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE
+SKIPFILE ICM   R2,B'1111',SKFILES  R2 = #(FILES TO BE SKIPPED)
+         BZ    SKIPBLKS            GO SKIP BLOCKS IF NO FILES
+         SPACE
+         OI    FLAGS1,EOF          SET 'LAST BLOCK READ WAS A TAPEMARK'
+SKFFSF   XCP   FSF                 SKIP 1 FILE
+         BNOK  SKFIOERR            GO TERMINATE IF ERROR
+         XCP   NOP                 ELSE WAIT FOR COMPLETION OF FSF
+         BNOK  SKFIOERR            GO TERMINATE IF I/O ERROR
+         TM    FLAGS2,EOV          WAS PREVIOUS FILE AN EOV LABEL? +2.4
+         BO    SKLEOV              YES, LOGICAL EOT, GO TERMINATE  +2.4
+         INCR  FILE#               ELSE FILE# + 1
+         BCT   R2,*+8              ANOTHER FILE TO BE SKIPPED ?
+         B     SKIPBLKS            NO, GO SKIP BLOCKS
+         SPACE
+         TM    FLAGS1,FULLTAPE     YES, FULL TAPE ANALYSIS MODE ?
+         BO    SKFFSF              YES, GO SKIP NEXT FILE
+SKFREAD  XCP   READFW              NO, READ NEXT BLOCK              2.4
+         BEOF  SKFEOF2             GO TEST FOR EOT IF TAPE MARK     2.4
+         BNEOV1 SKFFSF             ELSE TEST FOR VALID EOV1 LABEL  +2.4
+         OI    FLAGS2,EOV          OK, SET 'EOV LABEL FOUND'       +2.4
+         B     SKFFSF              GO SKIP NEXT FILE               +2.4
+         SPACE ,                                                   +2.4
+SKFEOF2  BLEOT SKLEOT              GO TERMINATE IF LOGICAL END OF TAPE
+         INCR  FILE#               ELSE EMPTY DATA SET, FILE NUMBER + 1
+         BCT   R2,SKFREAD          GO TEST NEXT FILE IF NECESSARY
+         SPACE
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        SKIP BLOCKS IF SPECIFIED                                     *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE
+SKIPBLKS ICM   R2,B'1111',SKBLOCKS R2 = #(BLOCKS TO BE SKIPPED)
+         BZ    READ                GO READ TAPE IF NO BLOCK SKIPPING
+         SPACE
+         OI    FLAGS1,SKIPPED      ELSE 'BLOCKS SKIPPED IN THIS FILE'
+         NI    FLAGS1,X'FF'-EOF    SET 'LAST BLOCK WAS NOT A TAPE MARK'
+         TM    FLAGS1,FULLTAPE     FULL TAPE ANALYSIS MODE ?
+         BO    SKBFSB              YES, DON'T CARE FOR DOUBLE TAPE MARK
+         LA    R1,1
+         C     R1,FILE#            NO, STILL IN FILE 1 ?
+         BE    SKBFSB              YES, GO SKIP BLOCKS
+         XCP   READFW              NO, READ 1ST BLOCK               2.4
+         BOK   SKBEOVT             GO TEST FOR EOV LABEL IF OK      2.4
+         BNEOF SKBERR              GO COUNT ERROR IF NO TAPE MARK
+         BLEOT SKLEOT              ANOTHER TAPE MARK, GO TERMINATE WITH
+         B     SKBEOF                 MESSAGE 'EOT' OR 'EOF'
+         SPACE ,                                                   +2.4
+SKBEOVT  BNEOV1 SKBBCT             TEST FOR VALID 'EOV1' LABEL     +2.4
+         OI    FLAGS2,EOV          OK, SET 'EOV LABEL FOUND'       +2.4
+         B     SKBBCT              GO SKIP 2ND BLOCK               +2.4
+         SPACE
+SKBFSB   XCP   FSB                 SKIP NEXT BLOCK
+         BOK   SKBBCT              GO SKIP ANOTHER BLOCK IF OK
+         BEOF  SKBEOF              GO TERMINATE IF END OF FILE
+SKBERR   INCR  ERRSUM              ELSE I/O ERROR, ERROR COUNT + 1
+SKBBCT   INCR  BLOCK#              BLOCK NUMBER + 1
+         BCT   R2,SKBFSB           SKIP AS MANY BLOCKS AS SPECIFIED
+         SPACE
+         ICM   R1,B'1111',ERRSUM   ERRORS ENCOUNTERED WHILE SKIPPING ?
+         BZ    READ                NO, OK, GO READ TAPE
+         DEC   SKBWERR#,(R1),5     YES, SET UP ERROR MESSAGE
+         DEC   SKBWFILE,FILE#,5
+         DPUT  SYSPRINT,SKBWARN1   DOUBLE PRINT ERROR MESSAGE
+         INCR  LINE#,2             LINE NUMBER ON PAGE + 2          2.5
+         TITLE '- MAIN PROGRAM CODE - READ TAPE AND PRINT BLOCKS'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        READ A BLOCK FROM TAPE AND PRINT HEADER LINE                 *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE
+READ     XCP   READFW              READ NEXT BLOCK FROM TAPE
+         BEOF  TM1                 GO PRINT FILE SUMMARY IF TAPE MARK
+         BNOK  ERROR               GO PRINT MESSAGE IF I/O ERROR    2.4
+         TM    FLAGS1,EOF          WAS PREVIOUS BLOCK A TAPE MARK? +2.4
+         BZ    PREPHEAD            NO, GO PREPARE BLOCK HEADER     +2.4
+         BNEOV1 PREPHEAD           YES, TEST FOR VALID EOV1 LABEL  +2.4
+         OI    FLAGS2,EOV          OK, SET 'EOV LABEL FOUND'       +2.4
+         B     PREPHEAD            GO PREPARE BLOCK HEADER         +2.4
+         SPACE
+ERROR    INCR  ERRFILE             ELSE ERROR, ERROR COUNT IN FILE + 1
+         HEX   RERRCC,ECBCC,2      SET UP ERROR MESSAGE
+         HEX   RERRSTAT,IOBCSW+3,4
+         HEX   RERRSENS,IOBSENS0,4
+         MVC   HEADVAR(READERR#),READERR   APPEND IT TO HEADER
+         B     PREPHEAD                    AND GO COMPLETE IT
+         SPACE
+TM1      DEC   FSUMFILE,FILE#,5    TAPE MARK READ, SET UP FILE SUMMARY
+         L     R1,BLOCK#
+         BCTR  R1,0
+         DEC   FSUMBLKS,(R1),5
+         DEC   FSUMBYTS,FILELEN,9
+         DEC   FSUMERRS,ERRFILE,5
+         L     R1,BLENMIN
+         C     R1,=X'7FFFFFFF'     MIN. BLOCK LENGTH STILL HIGH ?
+         BNE   *+6                 OK IF NOT
+         SR    R1,R1               MIN. BLOCK LENGTH = 0 IF NO BLOCKS
+         DEC   FSUMBMIN,(R1),5
+         MVC   FSUMBMAX(5),=C'*****'
+         ICM   R1,B'0011',READFW+6 =MAXIMUM READ LENGTH
+         C     R1,BLENMAX
+         BNH   PRINTSUM            MAX. = '*****' IF >= LENGTH READ
+         DEC   FSUMBMAX,BLENMAX,5
+PRINTSUM PUT   SYSPRINT,FILESUM    PRINT FILE SUMMARY LINE
+         INCR  LINE#,2             LINE NUMBER ON PAGE + 2          2.5
+         SPACE
+         TM    FLAGS1,SKIPPED      BLOCKS SKIPPED IN THIS FILE ?
+         BZ    TM1FMODT            NO, GO TEST FOR FILE MODE
+         DPUT  SYSPRINT,SKBWARN2   YES, 'SKIPPED BLOCKS NOT INCLUDED'
+         MVI   SKBWARN2,C' '       RESET WARNING MESSAGE
+         NI    FLAGS1,X'FF'-SKIPPED RESET 'BLOCKS SKIPPED IN THIS FILE'
+         SPACE
+TM1FMODT TM    FLAGS1,FILEMODE+LABLMODE       DON'T PRINT TAPE MARKS
+         BNZ   BLOCKEND                            IF NOT IN BLOCK MODE
+         MVC   HEADVAR(L'TAPEMARK),TAPEMARK   PUT 'TAPE MARK' INTO HEAD
+         SPACE
+PREPHEAD DEC   HEADFILE,FILE#,5    SET UP BLOCK HEADER LINE
+         DEC   HEADBLK,BLOCK#,5
+         MVC   HEADLEN(5),=C'*****'
+         SR    R1,R1
+         ICM   R1,B'0011',READFW+6 =LENGTH TO BE READ FROM CCW
+         SR    R0,R0
+         ICM   R0,B'0011',IOBCSW+5 R0 = RESIDUAL COUNT FROM CSW
+         SR    R1,R0               R1 = LENGTH OF BLOCK JUST READ
+         ST    R1,BLOCKLEN         SAVE IT
+         LTR   R0,R0
+         BZ    FMODTEST            PRINT 'LEN = *****' IF RES.COUNT = 0
+         DEC   HEADLEN,(R1),5      ELSE PRINT CORRECT BLOCK LENGTH
+         SPACE
+FMODTEST BNOK  PRNTHEAD            PRINT BLOCK IF I/O ERROR
+         TM    FLAGS1,FILEMODE
+         BO    BLOCKEND            DON'T PRINT IF IN FILE MODE
+         TM    FLAGS1,LABLMODE
+         BZ    PRNTHEAD            PRINT IF IN BLOCK MODE
+         CLC   BLOCK#,=F'3'
+         BH    BLOCKEND            PRINT 1ST 3 BLOCKS IF IN LABEL MODE
+PRNTHEAD PUT   SYSPRINT,HEADER
+         SPACE
+         BOK   RESETHDR
+         MVI   HEADER,C'+'         OVERPRINT BLOCK HEADER IF ERROR OR
+         PUT   SYSPRINT,HEADER                                TAPE MARK
+         PUT   SYSPRINT,HEADER
+         SPACE
+RESETHDR INCR  LINE#,2             LINE NUMBER ON PAGE + 2 FOR HDR  2.5
+         MVI   HEADER,C'0'                                          2.5
+         BLANK HEADVAR,L'HEADVAR   RESET HEADER LINE
+         SPACE
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        PRINT BEGINNING AND END OF BLOCK JUST READ                   *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE
+         ICM   R2,B'1111',BLOCKLEN                                  2.6
+         BZ    BLOCKEND            DON'T PRINT BLOCK IF LENGTH = 0
+         MIN   R2,=F'132'          ELSE R2 = MIN(LENGTH,132)        2.6
+         BCTR  R2,0                          - 1 FOR EXECUTE        2.6
+         EX    R2,MVC1             MVC  LINE+1(#),BUFFER            2.6
+         TM    FLAGS1,XLATE        ASCII TAPE (AL OR NL) ?          2.7
+         BZ    PRINTBEG            NO, OK                          +2.6
+         LA    R0,1(,R2)                                           +2.6
+         XLATE LINE+1,(0),TO=E     YES, TRANSLATE ASCII TO EBCDIC  +2.6
+PRINTBEG EX    R2,TR1              TRANSLATE TO PRINTABLE CHARACTERS2.6
+         PUT   SYSPRINT,LINE       PRINT BEGINNING OF BLOCK AS TEXT
+         BLANK LINE,L'LINE         RESET LINE BUFFER INCL. CONTROL CHAR
+         SPACE
+         MVOL  MVOBUF,BUFFER       SHIFT BEGINNING OF BLOCK         3.0
+         EX    R2,MVC2             MVC  LINE+1(#),MVOBUF           +3.0
+         EX    R2,TR2              TRANSLATE 2ND HEX DIGIT TO EBCDIC3.0
+         PUT   SYSPRINT,LINE       PRINT 1ST HEX DIGIT OF EVERY BYTE
+         BLANK LINE,L'LINE         RESET LINE BUFFER               +3.0
+         SPACE ,                                                   +3.0
+         EX    R2,MVC1             MVC  LINE+1(#),BUFFER           +3.0
+         EX    R2,TR2              XLATE 2ND HEX DIGITS TO EBCDIC  +3.0
+         PUT   SYSPRINT,LINE       PRINT 2ND DIGIT OF EVERY BYTE   +3.0
+         INCR  LINE#,3             LINE NUMBER ON PAGE + 3          3.0
+         BLANK LINE,L'LINE         RESET LINE BUFFER                2.5
+         SPACE
+         L     R1,BLOCKLEN                                          3.0
+         C     R1,=F'132'          COMPLETE BLOCK PRINTED ?         3.0
+         BNH   BLOCKEND            YES, DON'T PRINT END OF BLOCK
+         LA    R2,BUFFER(R1)       --> BEHIND BLOCK IN BUFFER       3.0
+         S     R2,=F'132'          R2 --> LAST LINE OF BLOCK        3.0
+         MVC   LINE+1(132),0(R2)                                    3.0
+         TM    FLAGS1,XLATE        ASCII TAPE (AL OR NL) ?          2.7
+         BZ    PRINTEND            NO, OK                          +2.6
+         XLATE LINE+1,132,TO=E     YES, TRANSLATE ASCII TO EBCDIC   3.0
+PRINTEND TR    LINE+1(132),PRINTTAB  XLATE TO PRINTABLE CHARACTERS  3.0
+         PUT   SYSPRINT,LINE       PRINT END OF BLOCK AS TEXT
+         BLANK LINE,L'LINE         RESET LINE BUFFER INCL. CONTROL CHAR
+         SPACE
+         MVOL  MVOBUF,0(R2)        SHIFT END OF BLOCK               3.0
+         MVC   LINE+1(132),MVOBUF                                  +3.0
+         TR    LINE+1(132),HEXTAB  XLATE 1ST HEX DIGITS TO EBCDIC   3.0
+         PUT   SYSPRINT,LINE       PRINT 1ST HEX DIGITS             2.6
+         BLANK LINE,L'LINE         RESET LINE BUFFER               +3.0
+         SPACE ,                                                   +3.0
+         MVC   LINE+1(132),0(R2)                                   +3.0
+         TR    LINE+1(132),HEXTAB  XLATE 2ND HEX DIGITS TO EBCDIC  +3.0
+         PUT   SYSPRINT,LINE       PRINT 2ND HEX DIGITS            +3.0
+         INCR  LINE#,3             LINE NUMBER ON PAGE + 3          3.0
+         BLANK LINE,L'LINE         RESET LINE BUFFER                2.5
+         SPACE
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        UPDATE COUNTERS ETC. FOR NEXT BLOCK                          *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE
+BLOCKEND BOK   COUNTEST            GO TEST FOR COUNT CONTROL IF OK  2.3
+         BEOF  COUNTEST                                   OR IF EOF 2.3
+         TM    IOBSENS0,X'40'      ELSE ERROR, UNIT STILL READY ?   3.4
+         BO    NOTREADY            GO TERMINATE IF NOT
+         TM    FLAGS1,FULLTAPE     READY, FULL TAPE ANALYSIS MODE? +3.3
+         BO    COUNTEST            YES, GO CONTINUE                +3.3
+         TM    IOBCSTAT,X'02'      NO, TEST FOR IFCC = TIMEOUT     +3.3
+         BO    EMPTY               GO TERMINATE IF TAPE IS EMPTY   +3.3
+         TM    IOBSENS1,X'01'      OK, NOT CAPABLE ?               +3.5
+         BZ    COUNTEST            NO, GO CONTINUE                 +3.5
+         TM    FLAGS2,DT3480       YES, TEST TAPE UNIT TYPE        +3.4
+         BO    EMPTY               3480, TAPE IS EMPTY             +3.5
+         B     WRONGDEN            3420, WRONG DENSITY FOR DRIVE    3.5
+         SPACE
+COUNTEST TM    FLAGS1,BLIMIT       PRINTING UNDER BLOCK LIMIT ?     2.3
+         BZ    EOFTEST             NO, CONTINUE                     2.3
+         BCT   R8,EOFTEST                                           2.3
+         B     COUNTEND            YES, GO TERMINATE IF LIMIT REACHED
+         SPACE
+EOFTEST  BEOF  TM2                 GO TEST FOR EOT IF EOF FOUND    +2.3
+         SPACE ,                                                   +2.3
+         NI    FLAGS1,X'FF'-EOF    SET 'LAST BLOCK WAS NO TAPE MARK'2.3
+         INCR  BLOCK#              BLOCK NUMBER + 1
+         L     R1,BLOCKLEN
+         INCR  FILELEN,(R1)        FILELEN + BLOCKLEN
+         C     R1,BLENMIN
+         BNL   *+8
+         ST    R1,BLENMIN          BLENMIN = MIN(BLENMIN,BLOCKLEN)
+         C     R1,BLENMAX
+         BNH   *+8
+         ST    R1,BLENMAX          BLENMAX = MAX(BLENMAX,BLOCKLEN)
+         B     PAGETEST            GO TEST FOR END OF OUTPUT PAGE
+         SPACE
+TM2      TM    FLAGS1,FLIMIT       TAPE MARK,PRINTING UNDER FILE LIMIT?
+         BZ    LEOTTEST            NO, GO TEST FOR LOGICAL END OF TAPE
+         BCT   R8,LEOTTEST         YES, CONTINUE IF LIMIT NOT REACHED
+         ICM   R1,B'1111',PRBLOCKS ELSE: NOW PRINT UNDER BLOCK LIMIT ?
+         BZ    COUNTEND            NO, GO TERMINATE
+         NI    FLAGS1,X'FF'-FLIMIT YES, RESET 'FILE LIMIT'
+         OI    FLAGS1,BLIMIT       SET 'PRINTING UNDER BLOCK LIMIT'
+         L     R8,PRBLOCKS         RELOAD COUNT REGISTER
+         SPACE
+LEOTTEST TM    FLAGS1,FULLTAPE     FULL TAPE ANALYSIS MODE ?        2.4
+         BO    PREPFILE            YES, GO PREPARE FOR NEXT FILE    2.4
+         TM    FLAGS2,EOV          NO, TAPE MARK AFTER EOV LABEL?  +2.4
+         BO    LEOTNORM            YES, LOGOCAL EOT, GO TERMINATE  +2.4
+         TM    FLAGS1,EOF          NO, 2ND TAPE MARK IN SUCCESSION? 2.4
+         BZ    PREPFILE            NO, GO PREPARE FOR NEXT FILE
+         BLEOT LEOTNORM            NO, GO TERMINATE IF LOGICAL EOT
+         SPACE
+PREPFILE OI    FLAGS1,EOF          SET 'LAST BLOCK WAS A TAPE MARK'
+         LA    R1,1
+         ST    R1,BLOCK#           BLOCK NUMBER = 1
+         L     R1,ERRSUM
+         A     R1,ERRFILE
+         ST    R1,ERRSUM           TOTAL ERRORS + ERRORS IN LAST FILE
+         SR    R1,R1
+         ST    R1,ERRFILE          ERRORS IN FILE = 0
+         ST    R1,FILELEN          FILE LENGTH = 0
+         ST    R1,BLENMAX          MAXIMUM BLOCK LENGTH IN FILE = 0
+         MVC   BLENMIN,=X'7FFFFFFF'   MIN. BLOCK LENGTH IN FILE = HIGH
+         INCR  FILE#               FILE NUMBER + 1                  2.4
+         SPACE
+PAGETEST LA    R1,58               59 - 66 LINES PER PAGE           3.0
+         C     R1,LINE#            PAGE FULL ?
+         BNL   READ                NO, GO READ NEXT BLOCK
+         INCR  PAGE#               YES, PAGE NUMBER + 1
+         LA    R1,1
+         ST    R1,LINE#            LINE NUMBER ON PAGE = 1
+         DEC   TITLEPAG,PAGE#,3
+         PUT   SYSPRINT,TITLE      PRINT TITLE LINE ON NEXT PAGE
+         B     READ                GO READ NEXT BLOCK
+         TITLE '- PARMCONV - CONVERT NUMERIC PARAMETERS TO BINARY'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+* PARMCONV: THIS SUBROUTINE CONVERTS A PARAMETER VALUE OF THE GENERAL *
+*           FORM (X,Y) INTO 2 BINARY INTEGERS                         *
+*                                                                     *
+* INPUT:    R15 = STRING POINTER TO PARAMETER                         *
+*                 (=FL1'LENGTH',AL3(PARAMETER))                       *
+*           R14 = RETURN ADDRESS                                      *
+*                                                                     *
+* OUTPUT:   R0 = 1ST SUBPARAMETER                                     *
+*           R1 = 2ND SUBPARAMETER                                     *
+*                                                                     *
+* CALL:     L     R15,STRINGPOINTER                                   *
+*           BAL   R14,PARMCONV                                        *
+*           STM   R0,R1,VALUES                                        *
+*                                                                     *
+* RETURN:   NORMALLY VIA R14,                                         *
+*           BRANCH TO 'PARMERR' IF ILLEGAL PARAMETERS                 *
+*                                                                     *
+* MODIFIED REGISTERS AND/OR GLOBAL VARIABLES:    R2, R3, R15          *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE 3
+PARMCONV LA    R3,0(,R15)          R3 --> 1ST CHARACTER
+         SRL   R15,24
+         BCTR  R15,0               R15 = LENGTH OF PARAMETER - 1
+         SR    R0,R0
+         SR    R1,R1               CLEAR OUTPUT REGISTERS
+         SPACE
+         CLI   0(R3),C'('          SUBPARAMETERS ?
+         BNE   PCPARM1
+         LA    R3,1(,R3)           DELETE PARENTHESES IF YES
+         SH    R15,=H'2'
+         BMR   R14                 RETURN WITH (0,0) IF JUST ()
+         SPACE
+PCPARM1  LA    R1,1(R15,R3)        --> BEHIND LAST CHARACTER
+         LA    R2,8                SIMULATE A COMMA AFTER PARAMETER
+         EX    R15,TRT             CHECK FOR COMMA AND NUMERICS
+         B     *(R2)               FUNCTION CODE IS 4 OR 8
+         B     PARMERR             4, ILLEGAL CHARACTER, GO TERMINATE
+         SR    R1,R3               8, OK, R1 = LENGTH OF SUBPARM 1
+         BZ    PCPARM2             R0 = 0 IF (,X)
+         BCTR  R1,0
+         EX    R1,PACK             CONVERT TO PACKED DECIMAL
+         LA    R1,1(,R1)
+         CVB   R0,D                R0 = 1ST SUBPARAMETER
+         SPACE
+PCPARM2  LA    R3,1(R1,R3)         R3 --> 2ND SUBPARAMETER
+         SR    R15,R1              R15 = LENGTH OF SUBPARM 2
+         LA    R1,0
+         BNPR  R14                 RETURN WITH R1 = 0 IF NO SUBPARM 2
+         BCTR  R15,0               R15 = LENGTH OF 2ND SUBPARAMETER - 1
+         EX    R15,TRT             CHECK FOR NUMERICS
+         BNZ   PARMERR             GO TERMINATE IF ILLEGAL CHARACTER
+         EX    R15,PACK            OK, CONVERT TO PACKED DECIMAL
+         CVB   R1,D                R1 = 2ND SUBPARAMETER
+         BR    R14                 RETURN
+         TITLE '- PROGRAM EXITS'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        PROGRAM EXITS                                                *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE
+SKFIOERR DEC   SKFMFILE,FILE#,5    I/O ERROR WHILE SKIPPING FILES
+         L     R1,IOBSTART
+         HEX   SKFMCCW,<R1>,2
+         HEX   SKFMECB,ECBCC,2     SET UP ERROR MESSAGE
+         HEX   SKFMSTAT,IOBSTBYT,4
+         HEX   SKFMSENS,IOBSENS0,4
+         PUT   SYSPRINT,SKFERMSG   PRINT ERROR MESSAGE
+         LA    R2,32               RC = 32 = I/O ERROR IN FSF       2.3
+         B     CLOSE               GO RETURN
+         SPACE 3
+SKLEOT   L     R1,FILE#            LOGICAL END OF TAPE MET WHILE SKIP
+         BCTR  R1,0                FILE# - 1
+         DEC   SKEOTFIL,(R1),5     SET UP ERROR MESSAGE
+         PUT   SYSPRINT,SKEOTMSG   PRINT ERROR MESSAGE
+         LA    R2,36               RC = 36 = LOGICAL EOT IN FSF/FSB 2.3
+         B     CLOSE               GO RETURN
+         SPACE 3                                                   +2.4
+SKLEOV   L     R1,FILE#            END OF MULTI-VOL DS WHILE SKIP  +2.4
+         DEC   SKEOVFIL,(R1),5     SET UP ERROR MESSAGE            +2.4
+         PUT   SYSPRINT,SKEOVMSG   PRINT ERROR MESSAGE             +2.4
+         LA    R2,40               RC = 40 = EOV IN FSF/FSB        +2.4
+         B     CLOSE               GO RETURN                       +2.4
+         SPACE 3                                                   +3.2
+WRONGDEV PUT   SYSPRINT,NOTAPMSG   'SPECIFIED UNIT IS NO TAPE'     +3.2
+         LA    R2,44               RC = 44 = WRONG DEVICE TYPE     +3.2
+         B     CLOSE               GO RETURN                       +3.2
+         SPACE 3
+NOPRINT  LA    R9,TAPE
+         TM    DCBOFLGS,DCBOFOPN   TAPE DCB OPEN ?
+         BZ    DDERR               NO, GO GET RETURN CODE
+         CLOSE (TAPE,REWIND)       YES, CLOSE IT
+         B     DDERR               GO GET RETURN CODE
+         SPACE 3
+NOTAPE   CLOSE SYSPRINT            CLOSE PRINT DCB
+         FREEPOOL SYSPRINT         FREE AUTOMATIC BUFFER POOL
+DDERR    LA    R2,28               RC = 28 = DD STATEMENT MISSING   2.3
+         B     EXIT                GO RETURN
+         SPACE 3
+PARMERR  WTO   '------------->  INVALID PARAMETER(S)',ROUTCDE=11  WTP
+         LA    R2,24               RC = 24 = INVALID PARAMETERS     2.3
+         B     EXIT                GO RETURN
+         SPACE 3
+SKBEOF   DEC   SKEOFBLK,BLOCK#,5   EOF WHILE SKIPPING BLOCKS
+         DEC   SKEOFFIL,FILE#,5    SET UP ERROR MESSAGE
+         PUT   SYSPRINT,SKEOFMSG   PRINT ERROR MESSAGE
+         LA    R2,20               RC = 20 = EOF WHILE SKIPPING BLOCKS
+         B     CLOSE
+         SPACE 3
+PRINT00  LA    R2,16               RC = 16 = PRINT=(0,0) REQUESTED  2.3
+         B     EXIT                GO RETURN
+         SPACE 3
+NOTREADY LA    R2,12               PRESET RETURN CODE              +2.3
+         L     R1,ERRSUM           = ERRORS IN PREVIOUS FILES
+         A     R1,ERRFILE          + ERRORS IN CURRENT FILE
+         BCT   R1,NOTRERRS         RC = 12 = ERRORS ON TAPE        +2.3
+         LA    R2,8                                                +2.3
+         TM    FLAGS1,FULLTAPE                                     +2.3
+         BZ    NOTRERRS            RC = 8 = NOT READY WITHOUT EOT  +2.3
+         LA    R2,4                RC = 4 = NOT READY WITH EOT     +2.3
+NOTRERRS LA    R1,1(,R1)           ADD 'NOT READY' TO ERROR COUNT  +2.3
+         DEC   NTRDERRS,(R1),5     EDIT ERROR COUNT INTO MESSAGE    2.3
+         PUT   SYSPRINT,NOTRDY     PRINT TOTAL NUMBER OF ERRORS
+         B     CLOSE               NORMAL END OF PROGRAM            2.3
+         SPACE 3                                                   +3.3
+EMPTY    LA    R2,12               PRESET RETURN CODE              +3.3
+         L     R1,ERRSUM           = ERRORS IN PREVIOUS FILES      +3.3
+         A     R1,ERRFILE          + ERRORS IN CURRENT FILE        +3.3
+         DEC   EMPTERRS,(R1),5     EDIT ERROR COUNT INTO MESSAGE   +3.3
+         PUT   SYSPRINT,EMPTYMSG   PRINT TOTAL NUMBER OF ERRORS    +3.3
+         B     CLOSE               NORMAL END OF PROGRAM           +3.3
+         SPACE 3                                                   +3.5
+WRONGDEN LA    R2,12               PRESET RETURN CODE              +3.5
+         L     R1,ERRSUM           = ERRORS IN PREVIOUS FILES      +3.5
+         A     R1,ERRFILE          + ERRORS IN CURRENT FILE        +3.5
+         DEC   NCAERRS,(R1),5      EDIT ERROR COUNT INTO MESSAGE   +3.5
+         PUT   SYSPRINT,NCAMSG     PRINT TOTAL NUMBER OF ERRORS    +3.5
+         B     CLOSE               NORMAL END OF PROGRAM           +3.5
+         SPACE 3
+LEOTNORM L     R2,ERRSUM           = ERRORS IN PREVIOUS FILES       2.3
+         A     R2,ERRFILE          + ERRORS IN CURRENT FILE         2.3
+         DEC   LEOTERRS,(R2),5                                      2.3
+         PUT   SYSPRINT,LEOT       PRINT TOTAL NUMBER OF ERRORS
+         B     RCDET               GO DETERMINE RETURN CODE         2.3
+         SPACE 3
+COUNTEND DEC   CNTFILES,PRFILES,5  PRINTED UNDER COUNT CONTROL
+         DEC   CNTBLKS,PRBLOCKS,5
+         L     R2,ERRSUM           = ERRORS IN PREVIOUS FILES       2.3
+         A     R2,ERRFILE          + ERRORS IN CURRENT FILE         2.3
+         DEC   CNTERRS,(R2),5                                       2.3
+         PUT   SYSPRINT,COUNTED    PRINT TERMINATION MESSAGE
+         SPACE
+RCDET    LTR   R2,R2               TEST NUMBER OF ERRORS ON TAPE    2.3
+         BZ    CLOSE               RC =  0 = NO ERRORS ON TAPE     +2.3
+         LA    R2,12               RC = 12 = ERRORS ON TAPE        +2.3
+         SPACE 3                                                   +2.3
+CLOSE    CLOSE (TAPE,REWIND,SYSPRINT)   CLOSE DCB'S
+         FREEPOOL SYSPRINT         FREE AUTOMATIC BUFFER POOL
+EXIT     EPILOG RC=(R2),SA=S       RETURN
+         TITLE '- RUN TIME CONSTANTS, VARIABLES, AND WORK AREAS'
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        I/O CONTROL BLOCKS AND CHANNEL PROGRAMS                      *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE 3
+SYSPRINT DCB   DDNAME=SYSPRINT,DSORG=PS,MACRF=PM,                      -
+               RECFM=FBA,LRECL=133,BLKSIZE=3059
+         SPACE
+TAPE     DCB   DDNAME=TAPE,MACRF=E,IMSK=NO,IOBAD=IOBSTDRD,DEVD=TA
+         SPACE 2
+         IEZIOB DSECT=NO           IOB
+IOB#     EQU   *-IOB
+         SPACE 2
+         IHAECB DSECT=NO           ECB
+         SPACE 2
+FSB      CCW   X'37',0,CC+SLI,1    FORWARD SPACE BLOCK              3.1
+         CCW   X'03',0,SLI,1          NOP TO RECOGNIZE TAPE MARKS  +3.1
+FSF      CCW   X'3F',0,SLI,1       FORWARD SPACE FILE
+NOP      CCW   X'03',0,SLI,1       NO OPERATION
+READFW   CCW   X'02',BUFFER,SLI,X'FFFF'   READ FORWARD
+READVOL1 CCW   X'02',BUFFER,0,80   READ 80 CHARACTERS VOLUME LABEL
+REW      CCW   X'07',0,SLI,1       REWIND
+SENSE    CCW   X'04',BUFFER,0,24   READ 24 SENSE BYTES
+         EJECT
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        RUN TIME VARIABLES                                           *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE 3
+PAGE#    DC    F'1'                CURRENT PAGE NUMBER
+LINE#    DC    F'1'                CURRENT LINE NUMBER IN PAGE
+FILE#    DC    F'1'                CURRENT FILE NUMBER ON TAPE
+BLOCK#   DC    F'1'                CURRENT BLOCK NUMBER ON TAPE
+FILELEN  DC    F'0'                LENGTH OF CURRENT FILE IN BYTES
+BLOCKLEN DS    F                   LENGTH OF CURRENT BLOCK
+BLENMIN    DS    0F                MINIMUM BLOCK LENGTH IN CURRENT FILE
+         DC    X'7FFFFFFF'
+BLENMAX  DC    F'0'                MAXIMUM BLOCK LENGTH IN CURRENT FILE
+ERRFILE  DC    F'0'                NUMBER OF I/O ERRORS IN CURRENT FILE
+ERRSUM   DC    F'0'                NUMBER OF I/O ERRORS ON TAPE
+         SPACE
+SKIPVALS   DS    0F
+SKFILES  DC    F'0'                #(FILES TO BE SKIPPED)
+SKBLOCKS DC    F'0'                #(BLOCKS TO BE SKIPPED)
+         SPACE
+PRNTVALS   DS    0F
+PRFILES  DC    F'0'                #(FILES TO BE PRINTED)
+PRBLOCKS DC    F'0'                #(BLOCKS TO BE PRINTED)
+         SPACE 2
+FLAGS1   DC    AL1(LABLMODE)       MISCELLANEOUS INDICATORS:        2.6
+FILEMODE   EQU   X'80'  10.. ....    FILE MODE
+LABLMODE   EQU   X'40'  01.. ....    LABEL MODE
+*                       00.. ....    BLOCK MODE
+FLIMIT     EQU   X'20'  ..1. ....    PRINT UNDER FILE LIMIT
+BLIMIT     EQU   X'10'  ...1 ....    PRINT UNDER BLOCK LIMIT
+FULLTAPE   EQU   X'08'  .... 1...    IGNORE LOGICAL END OF TAPE
+XLATE      EQU   X'04'  .... .1..    TAPE IS ASCII (AL OR NL)       2.7
+SKIPPED    EQU   X'02'  .... ..1.    BLOCKS SKIPPED IN CURRENT FILE
+EOF        EQU   X'01'  .... ...1    LAST BLOCK READ WAS A TAPE MARK
+         SPACE ,                                                   +2.4
+FLAGS2   DC    AL1(SL)                                              2.6
+EOV        EQU   X'80'  1... ....    END-OF-VOLUME LABEL FOUND     +2.4
+SL         EQU   X'40'  .10. ....    TAPE HAS IBM STANDARD LABELS   2.6
+AL         EQU   X'20'  .01. ....    TAPE HAS ANSI LABELS          +2.6
+*                       .00. ....    NO OR NONSTANDARD LABELS      +2.6
+DT3480     EQU   X'10'  ...1 ....    3480 TAPE UNIT                +3.4
+*                       ...0 ....    3420 TAPE UNIT                +3.4
+         SPACE 2
+D        DS    D                   TEMPORARY DOUBLE WORD
+           ORG   D
+DX       DS    D,X                 EXTENDED DOUBLE WORD FOR UNPK
+         EJECT
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        CHARACTER MANIPULATION INSTRUCTIONS AND TABLES               *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE 3
+MVC1     MVC   LINE+1(#),BUFFER
+MVC2     MVC   LINE+1(#),MVOBUF                                     3.0
+MVC5     MVC   TITPARMS(#),0(R1)
+PACK     PACK  D(8),0(#,R3)        LEN2 2 IS MODULO 16 BECAUSE OF LEN1
+TR1      TR    LINE+1(#),PRINTTAB  TRANSLATE TO PRINTABLE CHARACTERS
+TR2      TR    LINE+1(#),HEXTAB    XLATE 2ND HEX DIGITS TO EBCDIC  +3.0
+TRT      TRT   0(#,R3),TRTTAB      SCAN PARAMETERS
+         SPACE 2
+PRINTTAB PRTAB 256C' ',(C'.',6),(C'$',7),(C',',5),(C':',6),(X'81',9),  -
+               (X'91',9),(X'A2',8),(C'A',9),(C'J',9),(C'S',8),(C'0',10)
+         SPACE
+TRTTAB   PRTAB 256AL1(4),          ILLEGAL CHARACTER                   -
+               (C',',AL1(8)),      PARAMETER SEPARATOR                 -
+               (C'0',10AL1(0))     LEGAL PARAMETER CHARACTERS
+         SPACE
+HEXTAB   DC    16C'0123456789ABCDEF' TRANSLATE TABLE FOR HEX OUTPUT 3.0
+         EJECT
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        PARAMETERS FOR BTXCSCAN                                      *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE 3
+BTXCPARM   DS    0F                PARAMETER LIST FOR BTXCSCAN
+         DC    X'00'               NO CONTINUATION CALL
+           DC    AL3(BTXCWORK)     --> WORK AREA FOR TRT-TABLE
+         DC    X'00'               SHORT STRING POINTER FOR INPUT
+           DC    AL3(EXECPARM)     --> STRING POINTER TO PARM FIELD
+         DC    A(0)                NO POSITIONAL PARAMETERS
+         DC    X'80'               STANDARD DELIMITER SET
+           DC    AL3(KEYWLIST)     --> KEYWORD PARAMETER LIST
+         SPACE 2
+EXECPARM   DS    0F                STRING POINTER TO PARM TEXT
+         DS    FL1                 LENGTH OF PARM FIELD FROM EXEC
+           DS    AL3               --> PARM FIELD
+         SPACE 2
+KEYWLIST   DS    0F                KEYWORD PARAMETER OUTPUT LIST
+         DC    FL1'5'              5 KEYWORDS                       2.7
+           DC    AL3(KEYWORDS)     --> KEYWORDS
+MODE     DS    FL1,AL3             SPACE FOR 4 PARM STRING POINTERS
+SKIP     DS    FL1,AL3
+PRINT    DS    FL1,AL3
+EOT      DS    FL1,AL3
+ASCII    DS    FL1,AL3                                             +2.7
+         SPACE 2
+KEYWORDS DC    FL1'4',C'MODE'
+         DC    FL1'4',C'SKIP'
+         DC    FL1'5',C'PRINT'
+         DC    AL1(X'80'+3),C'EOT'     NO-VALUE KEYWORD ONLY
+         DC    AL1(X'80'+5),C'ASCII'   NO-VALUE KEYWORD ONLY
+         SPACE 2                                                   +2.7
+BTXCWORK DS    XL256                   WORK AREA FOR BTXCSCAN
+         EJECT
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        ERROR MESSAGES AND WARNINGS                                  *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE 3
+NOTAPMSG DC    C'0THE DEVICE SPECIFIED THROUGH DD STATEMENT ''TAPE'' IS-
+                NOT A MAGNETIC TAPE UNIT.'                         +3.2
+         DC    CL(NOTAPMSG+133-*)' '                               +3.2
+         SPACE 2                                                   +3.2
+SKFERMSG DC    C'0I/O ERROR WHILE SKIPPING FILE '                   2.5
+SKFMFILE DS    CL5
+         DC    C', PROCESSING TERMINATED.  CCW = '
+SKFMCCW  DS    CL2
+         DC    C',  ECB = '
+SKFMECB  DS    CL2
+         DC    C',  STATUS = '
+SKFMSTAT DS    CL4
+         DC    C',  SENSE = '
+SKFMSENS DS    CL4
+         DC    CL(SKFERMSG+133-*)' '
+         SPACE 2
+SKEOTMSG DC    C'0LOGICAL END OF TAPE MET WHILE SKIPPING:  2 TAPE MARKS-
+                AFTER FILE '                                        2.5
+SKEOTFIL DS    CL5
+         DC    CL(SKEOTMSG+133-*)', PROCESSING TERMINATED.'
+         SPACE 2                                                   +2.4
+SKEOVMSG DC    C'0LOGICAL END OF TAPE MET WHILE SKIPPING:  END OF MULTI-
+               -VOLUME DATA SET AFTER FILE '                        2.5
+SKEOVFIL DS    CL5                                                 +2.4
+         DC    CL(SKEOVMSG+133-*)', PROCESSING TERMINATED.'        +2.4
+         SPACE 2
+SKEOFMSG DC    C'0ERROR WHILE SKIPPING BLOCKS:  TAPE MARK INSTEAD OF BL-
+               OCK '                                                2.5
+SKEOFBLK DS    CL5
+         DC    C' IN FILE '
+SKEOFFIL DS    CL5
+         DC    CL(SKEOFMSG+133-*)', PROCESSING TERMINATED.'
+         SPACE 2
+SKBWARN1 DC    C'0WARNING: '                                        2.5
+SKBWERR# DS    CL5
+         DC    C' I/O ERROR(S) WHILE SKIPPING BLOCKS IN FILE '
+SKBWFILE DS    CL5
+         DC    CL(SKBWARN1+133-*)' '
+         SPACE 2
+SKBWARN2 DC    CL(FSUMBYTS-FILESUM)' '
+         DC    CL(SKBWARN2+133-*)'|-------> WARNING: SKIPPED BLOCKS NOT-
+                INCLUDED IN THESE VALUES'
+         EJECT
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+*        NORMAL MESSAGES AND I/O BUFFERS                              *
+*-- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --*
+         SPACE 3
+WTOEOT   WTO   'TAPESKIM - ACHTUNG: BAND ?????? WIRD GANZ DURCHGEZOGEN'-
+               ,ROUTCDE=(2,3),DESC=3,MF=L
+         SPACE 2
+TITLE    DC    C'1TAPESKIM V3.6  -  '                               3.6
+TITPARMS DC    CL(TITLE+133-*-TITLER#)'NO PARAMETERS'
+TITLER   DC    C'    SCANNING TAPE '
+TITLEVOL DC    C'123456  -  '
+TITLEDEN DC    C'CASSETTE  -  '                                     3.5
+TITLELAB DC    C'SL  -  '                                          +2.6
+TITLEVAR DC    C' FILE MODE  -  PAGE '
+TITLEPAG DS    CL3
+TITLER#  EQU   *-TITLER
+         SPACE 2
+HEADER   DC    C'0FILE '                                            2.5
+HEADFILE DS    CL5
+         DC    C',  BLOCK '
+HEADBLK  DS    CL5
+         DC    C',  LENGTH = '
+HEADLEN  DS    CL5
+         DC    C' (DEC)   '
+HEADVAR  DC    CL(HEADER+133-*)' '
+         SPACE
+TAPEMARK DC    C'*** TAPE MARK *** '
+         SPACE
+READERR  DC    C'*** I/O ERROR ***   COMP. CODE = '
+RERRCC   DS    CL2
+         DC    C', CSW STATUS = '
+RERRSTAT DS    CL4
+         DC    C', SENSE DATA = '
+RERRSENS DS    CL4
+READERR# EQU   *-READERR
+         SPACE 2
+FILESUM  DC    C'0FILE '                                            2.5
+FSUMFILE DS    CL5
+         DC    C' CONTAINS '
+FSUMBLKS DS    CL5
+         DC    C' DATA BLOCKS, '                                    3.6
+FSUMBYTS DS    CL9
+         DC    C' BYTES, '
+FSUMERRS DS    CL5
+         DC    C' ERROR(S).   BLKSIZE MIN. = '
+FSUMBMIN DS    CL5
+         DC    C', MAX. = '
+FSUMBMAX DS    CL5
+         DC    CL(FILESUM+133-*)'.'                                 3.6
+         SPACE 2
+NOTRDY   DC   C'0TAPE UNIT LOST READY STATUS.  TOTAL ERROR COUNT: ' 2.5
+NTRDERRS DS    CL5
+         DC    CL(NOTRDY+133-*)' '
+         SPACE 2                                                   +3.3
+EMPTYMSG DC   C'0REMAINDER OF TAPE IS EMPTY.  TOTAL ERROR COUNT: ' +3.3
+EMPTERRS DS    CL5                                                 +3.3
+         DC    CL(EMPTYMSG+133-*)' '                               +3.3
+         SPACE 2                                                   +3.5
+NCAMSG   DC    C'0TAPE HAS WRONG DENSITY FOR THIS TAPE DRIVE.  TOTAL ER-
+               ROR COUNT: '                                        +3.5
+NCAERRS  DS    CL5                                                 +3.5
+         DC    CL(NCAMSG+133-*)' '                                 +3.5
+         SPACE 2
+LEOT     DC    C'0LOGICAL END OF TAPE.  TOTAL ERROR COUNT: '        2.5
+LEOTERRS DS    CL5
+         DC    CL(LEOT+133-*)' '
+         SPACE 2
+COUNTED  DC    C'0 '                                                2.5
+CNTFILES DS    CL5
+         DC    C' FILE(S) AND '
+CNTBLKS  DS    CL5
+         DC    C' BLOCK(S) PRINTED.  TOTAL ERROR COUNT: '
+CNTERRS  DS    CL5
+         DC    CL(COUNTED+133-*)' '
+         SPACE 2
+LINE     DC    CL133' '            BUFFER FOR 1 OUTPUT LINE         2.5
+         SPACE 2
+MVOBUF   DS    CL133               BUFFER FOR MVO FOR 1 LINE        3.0
+         SPACE 2
+XLATEBUF DS    CL4                 BUFFER FOR ASCII TRANSLATE SVC  +2.6
+         SPACE 2                                                   +2.6
+BUFFER   DS    XL(X'FFFF')         INPUT BUFFER FOR TAPE
+         SPACE 2
+         END   TAPESKIM
